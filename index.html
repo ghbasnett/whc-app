@@ -698,13 +698,13 @@ async function loadTsSquad(){
   tsSquad=players.map(p=>({name:p.name,role:p.role,selected:false}));
   document.getElementById('ts-squad-hint').textContent='Tick players playing this week. GK = #1, captain = ©, players from #3 up.';
   // Load upcoming fixtures
-  const{data:fixtures}=await sb.from('fixtures').select('id,match_date,opponent').is('result',null).eq('season',currentSeason).order('match_date',{ascending:true});
+  const{data:fixtures}=await sb.from('fixtures').select('id,match_date,opponent,venue,kick_off_time').is('result',null).eq('season',currentSeason).order('match_date',{ascending:true});
   const sel=document.getElementById('ts-fixture-sel');
   sel.innerHTML='<option value="">— Select fixture —</option>';
   (fixtures||[]).forEach(f=>{
     const d=new Date(f.match_date).toLocaleDateString('en-GB',{day:'numeric',month:'short'});
     const o=document.createElement('option');
-    o.value=JSON.stringify({date:f.match_date,opponent:f.opponent});
+    o.value=JSON.stringify({date:f.match_date,opponent:f.opponent,venue:f.venue||'',time:f.kick_off_time||''});
     o.textContent=`${d} — ${f.opponent}`;
     sel.appendChild(o);
   });
@@ -739,10 +739,10 @@ function tsupdateCount(){
 function onTsFixtureSelect(){
   const sel=document.getElementById('ts-fixture-sel');
   if(!sel.value)return;
-  const{date,opponent}=JSON.parse(sel.value);
-  // Populate opposition
+  const{date,opponent,venue,time}=JSON.parse(sel.value);
   document.getElementById('ts-e-opposition').value=opponent;
-  // Store date for preview
+  document.getElementById('ts-e-venue').value=venue;
+  document.getElementById('ts-e-meet').value=time?'Pushback: '+time:'';
   sel.dataset.date=date;
   tsRenderPreview();
 }
