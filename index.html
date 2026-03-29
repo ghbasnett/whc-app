@@ -311,6 +311,7 @@ body{background:var(--dark);color:var(--white);font-family:'Outfit',sans-serif;m
               <div class="ts-vs-line">Wimbledon HC vs</div>
               <div class="ts-match-title" id="ts-v-opposition"></div>
               <div class="ts-meet-badge">Meet <span id="ts-v-meet"></span></div>
+              <div class="ts-meet-badge" id="ts-v-pushback-wrap" style="margin-top:6px;background:#1a1f4e;border:1px solid #c8a96e;color:#c8a96e;display:none">Pushback <span id="ts-v-pushback"></span></div>
             </div>
             <div class="ts-crest-wrap"><img id="ts-v-awayLogo" src="" alt="Away"></div>
           </div>
@@ -742,7 +743,7 @@ function onTsFixtureSelect(){
   const{date,opponent,venue,time}=JSON.parse(sel.value);
   document.getElementById('ts-e-opposition').value=opponent;
   document.getElementById('ts-e-venue').value=venue;
-  document.getElementById('ts-e-meet').value=time?'Pushback: '+time:'';
+  sel.dataset.pushback=time||'';
   sel.dataset.date=date;
   tsRenderPreview();
 }
@@ -761,6 +762,10 @@ function tsRenderPreview(){
   document.getElementById('ts-v-date').textContent=dateStr+(comp?' · '+comp:'');
   document.getElementById('ts-v-opposition').textContent=document.getElementById('ts-e-opposition').value||'Opposition';
   document.getElementById('ts-v-meet').textContent=document.getElementById('ts-e-meet').value||'TBC';
+  const pushback=sel&&sel.dataset.pushback?sel.dataset.pushback:'';
+  const pbWrap=document.getElementById('ts-v-pushback-wrap');
+  if(pushback){pbWrap.style.display='inline-block';document.getElementById('ts-v-pushback').textContent=pushback;}
+  else{pbWrap.style.display='none';}
   document.getElementById('ts-v-venue').textContent=document.getElementById('ts-e-venue').value||'TBC';
   document.getElementById('ts-v-ha').textContent=document.getElementById('ts-e-ha').value;
   document.getElementById('ts-v-fee').textContent=document.getElementById('ts-e-fee').value;
