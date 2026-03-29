@@ -339,14 +339,17 @@ body{background:var(--dark);color:var(--white);font-family:'Outfit',sans-serif;m
           <div class="ts-edit-card">
             <div class="ts-edit-header">Match Details</div>
             <div class="ts-edit-body">
+              <div class="ts-edit-field" style="margin-bottom:4px">
+                <label>Fixture</label>
+                <select id="ts-fixture-sel" onchange="onTsFixtureSelect()"><option value="">— Select fixture —</option></select>
+              </div>
               <div class="ts-edit-row">
-                <div class="ts-edit-field"><label>Date</label><input type="date" id="ts-e-date"></div>
                 <div class="ts-edit-field"><label>Competition</label>
                   <select id="ts-e-comp"><option>League</option><option>Cup</option><option>Friendly</option><option>Playoff</option></select>
                 </div>
               </div>
               <div class="ts-edit-row">
-                <div class="ts-edit-field"><label>Opposition</label><input type="text" id="ts-e-opposition" placeholder="e.g. Barnes M4"></div>
+                <div class="ts-edit-field"><label>Opposition</label><input type="text" id="ts-e-opposition" placeholder="Auto-filled from fixture"></div>
                 <div class="ts-edit-field"><label>Meet Time</label><input type="text" id="ts-e-meet" placeholder="e.g. 12:30pm"></div>
               </div>
               <div class="ts-edit-row">
@@ -689,13 +692,22 @@ async function checkCaptainPw(){
 // ── TEAMSHEET ─────────────────────────────────────────────────
 async function loadTsSquad(){
   document.getElementById('ts-squad-hint').textContent='Loading players...';
-  const{data,error}=await sb.from('players').select('name,role').eq('active',true).order('sort_order',{ascending:true});
-  if(error||!data){
-    document.getElementById('ts-squad-hint').textContent='Failed to load players.';
-    return;
-  }
-  tsSquad=data.map(p=>({name:p.name,role:p.role,selected:false}));
+  // Load players
+  const{data:players,error}=await sb.from('players').select('name,role').eq('active',true).order('sort_order',{ascending:true});
+  if(error||!players){document.getElementById('ts-squad-hint').textContent='Failed to load players.';return;}
+  tsSquad=players.map(p=>({name:p.name,role:p.role,selected:false}));
   document.getElementById('ts-squad-hint').textContent='Tick players playing this week. GK = #1, captain = ©, players from #3 up.';
+  // Load upcoming fixtures
+  const{data:fixtures}=await sb.from('fixtures').select('id,match_date,opponent').is('result',null).eq('season',currentSeason).order('match_date',{ascending:true});
+  const sel=document.getElementById('ts-fixture-sel');
+  sel.innerHTML='<option value="">— Select fixture —</option>';
+  (fixtures||[]).forEach(f=>{
+    const d=new Date(f.match_date).toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+    const o=document.createElement('option');
+    o.value=JSON.stringify({date:f.match_date,opponent:f.opponent});
+    o.textContent=`${d} — ${f.opponent}`;
+    sel.appendChild(o);
+  });
   renderTsSquadList();
   tsRenderPreview();
   tsSetMode('present');
@@ -724,8 +736,20 @@ function tsupdateCount(){
   document.getElementById('ts-selectedCount').textContent=n+' selected for this week';
 }
 
+function onTsFixtureSelect(){
+  const sel=document.getElementById('ts-fixture-sel');
+  if(!sel.value)return;
+  const{date,opponent}=JSON.parse(sel.value);
+  // Populate opposition
+  document.getElementById('ts-e-opposition').value=opponent;
+  // Store date for preview
+  sel.dataset.date=date;
+  tsRenderPreview();
+}
+
 function tsRenderPreview(){
-  const raw=document.getElementById('ts-e-date').value;
+  const sel=document.getElementById('ts-fixture-sel');
+  const raw=sel&&sel.dataset.date?sel.dataset.date:'';
   const comp=document.getElementById('ts-e-comp').value;
   let dateStr='';
   if(raw){
@@ -790,8 +814,7 @@ function tsSetMode(mode){
 document.getElementById('ts-editPanel').addEventListener('input',()=>tsRenderPreview());
 document.getElementById('ts-editPanel').addEventListener('change',()=>tsRenderPreview());
 
-// Set today's date as default
-(()=>{const t=new Date();const y=t.getFullYear(),m=String(t.getMonth()+1).padStart(2,'0'),d=String(t.getDate()).padStart(2,'0');document.getElementById('ts-e-date').value=`${y}-${m}-${d}`;})();
+
 
 // ── STEPPER ───────────────────────────────────────────────────
 function makeStepper(cls,tint){
