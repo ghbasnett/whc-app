@@ -720,8 +720,13 @@ function renderTsSquadList(){
   tsSquad.forEach((p,idx)=>{
     const row=document.createElement('div');
     row.className='ts-squad-row'+(p.selected?' selected':'');
+    row.style.cursor='pointer';
     const cb=document.createElement('input');cb.type='checkbox';cb.checked=p.selected;
     cb.addEventListener('change',()=>{tsSquad[idx].selected=cb.checked;row.classList.toggle('selected',cb.checked);tsupdateCount();tsRenderPreview();});
+    row.addEventListener('click',(e)=>{
+      if(e.target===cb||e.target.tagName==='SELECT')return;
+      cb.checked=!cb.checked;cb.dispatchEvent(new Event('change'));
+    });
     const nm=document.createElement('span');nm.className='ts-squad-name';nm.textContent=p.name;
     const rs=document.createElement('select');rs.className='ts-squad-role-select';
     ['player','gk','cap'].forEach(r=>{const o=document.createElement('option');o.value=r;o.textContent=r==='gk'?'GK':r==='cap'?'Captain':'Player';if(p.role===r)o.selected=true;rs.appendChild(o);});
