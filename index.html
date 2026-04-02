@@ -64,7 +64,8 @@ body{background:var(--dark);color:var(--white);font-family:'Outfit',sans-serif;m
 .sort-tab.active,.sort-tab:hover{background:var(--pink);color:#fff;border-color:var(--pink);}
 
 /* FIXTURES */
-.fixture-item{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:8px;display:grid;grid-template-columns:auto 1fr;gap:0 12px;align-items:center;}
+.fixture-item{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:8px;display:grid;grid-template-columns:auto 1fr;gap:0 12px;align-items:center;cursor:pointer;transition:border-color 0.2s,transform 0.15s;}
+.fixture-item:hover{border-color:var(--pink);transform:scale(1.01);}
 .fixture-date-col{display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(107,30,58,0.4);border-radius:8px;padding:8px 10px;min-width:52px;text-align:center;border:1px solid rgba(232,84,122,0.2);}
 .fixture-date-col .fix-day{font-size:11px;color:var(--light-pink);font-weight:300;text-transform:uppercase;letter-spacing:1px;}
 .fixture-date-col .fix-num{font-family:'Bebas Neue',sans-serif;font-size:26px;color:var(--white);line-height:1;}
@@ -76,6 +77,49 @@ body{background:var(--dark);color:var(--white);font-family:'Outfit',sans-serif;m
 .badge{display:inline-block;padding:2px 7px;border-radius:8px;font-size:10px;font-weight:700;}
 .badge-W{background:rgba(46,160,67,0.2);color:#4caf50;}.badge-L{background:rgba(220,53,69,0.2);color:#f44336;}.badge-D{background:rgba(255,193,7,0.15);color:#ffc107;}
 .upcoming-tag{font-size:11px;color:#555;font-style:italic;}
+
+/* FIXTURE DETAIL */
+.fix-detail-overlay{position:fixed;inset:0;z-index:150;pointer-events:none;display:flex;flex-direction:column;}
+.fix-detail-overlay.open{pointer-events:all;}
+.fix-detail-panel{background:var(--dark);position:absolute;inset:0;transform:scale(0.92);opacity:0;transition:transform 0.32s cubic-bezier(0.34,1.2,0.64,1),opacity 0.25s ease;transform-origin:center center;overflow-y:auto;padding-bottom:80px;}
+.fix-detail-overlay.open .fix-detail-panel{transform:scale(1);opacity:1;}
+.fix-detail-back{display:flex;align-items:center;gap:8px;padding:14px 16px 0;cursor:pointer;color:var(--pink);font-size:13px;font-weight:600;letter-spacing:1px;text-transform:uppercase;width:fit-content;}
+.fix-detail-back:hover{color:var(--white);}
+.fix-score-hero{text-align:center;padding:24px 16px 20px;border-bottom:1px solid var(--border);}
+.fix-score-hero .fsh-date{font-size:11px;color:#555;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;}
+.fix-score-hero .fsh-opponent{font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:3px;color:var(--white);margin-bottom:14px;}
+.fix-score-hero .fsh-score{font-family:'Bebas Neue',sans-serif;font-size:72px;line-height:1;letter-spacing:6px;margin-bottom:8px;}
+.fsh-score.score-W{color:#4caf50;}.fsh-score.score-L{color:#f44336;}.fsh-score.score-D{color:#ffc107;}.fsh-score.score-upcoming{color:#555;}
+.fix-score-hero .fsh-result{display:inline-block;padding:4px 16px;border-radius:20px;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;}
+.fsh-result.score-W{background:rgba(76,175,80,0.15);color:#4caf50;border:1px solid rgba(76,175,80,0.3);}
+.fsh-result.score-L{background:rgba(244,67,54,0.15);color:#f44336;border:1px solid rgba(244,67,54,0.3);}
+.fsh-result.score-D{background:rgba(255,193,7,0.12);color:#ffc107;border:1px solid rgba(255,193,7,0.25);}
+.fix-score-hero .fsh-meta{font-size:12px;color:#555;display:flex;justify-content:center;gap:16px;flex-wrap:wrap;margin-top:8px;}
+.fix-awards-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border);}
+.fix-award-card{border-radius:10px;padding:12px 14px;text-align:center;}
+.fix-award-card.mom{background:rgba(212,175,55,0.1);border:1px solid rgba(212,175,55,0.3);}
+.fix-award-card.dod{background:rgba(139,90,43,0.12);border:1px solid rgba(139,90,43,0.3);}
+.fix-award-card .fac-label{font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;}
+.fix-award-card.mom .fac-label{color:#d4af37;}
+.fix-award-card.dod .fac-label{color:#8b5a2b;}
+.fix-award-card .fac-name{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:2px;color:var(--white);}
+.fix-players-section{padding:14px 16px;}
+.fix-players-section h3{font-size:11px;color:var(--pink);letter-spacing:2px;text-transform:uppercase;font-weight:700;margin-bottom:10px;}
+.fix-player-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,0.04);}
+.fix-player-row:last-child{border-bottom:none;}
+.fix-player-row.is-mom{background:rgba(212,175,55,0.06);border-radius:8px;padding:9px 8px;margin:0 -8px;}
+.fix-player-row.is-dod{background:rgba(139,90,43,0.08);border-radius:8px;padding:9px 8px;margin:0 -8px;}
+.fpr-name{flex:1;font-size:13px;font-weight:600;color:var(--white);}
+.fpr-badge{font-size:10px;font-weight:700;padding:1px 6px;border-radius:6px;margin-left:4px;}
+.fpr-badge.mom{background:rgba(212,175,55,0.25);color:#d4af37;}
+.fpr-badge.dod{background:rgba(139,90,43,0.25);color:#cd853f;}
+.fpr-stats{display:flex;gap:8px;align-items:center;}
+.fpr-stat{display:flex;flex-direction:column;align-items:center;min-width:28px;}
+.fpr-stat span:first-child{font-size:13px;font-weight:700;color:var(--white);}
+.fpr-stat span:last-child{font-size:9px;color:#444;text-transform:uppercase;letter-spacing:0.5px;}
+.fpr-stat.has-val span:first-child{color:var(--pink);}
+.fpr-card{display:inline-block;width:10px;height:14px;border-radius:2px;margin:1px;}
+.fpr-card.green{background:#4caf50;}.fpr-card.yellow{background:#ffc107;}.fpr-card.red{background:#f44336;}
 
 /* FORMS */
 .form-group{margin-bottom:12px;}
@@ -450,6 +494,14 @@ body{background:var(--dark);color:var(--white);font-family:'Outfit',sans-serif;m
   <div class="page-title">Fixtures & Results</div>
   <div class="loading" id="fix-loading"><div class="spinner"></div><br>Loading...</div>
   <div id="fix-list"></div>
+</div>
+
+<!-- FIXTURE DETAIL OVERLAY -->
+<div class="fix-detail-overlay" id="fix-detail-overlay">
+  <div class="fix-detail-panel" id="fix-detail-panel">
+    <div class="fix-detail-back" onclick="closeFixtureDetail()">← Back to Fixtures</div>
+    <div id="fix-detail-body"></div>
+  </div>
 </div>
 
 <!-- FINE -->
@@ -939,8 +991,88 @@ function renderFixtures(rows){
         <div class="fixture-opponent">${isPast?`<span class="fixture-score">${r.whc_goals}–${r.opp_goals}</span>`:''}${r.opponent}${isPast?`<span class="badge badge-${r.result}">${r.result}</span>`:'<span class="upcoming-tag">Upcoming</span>'}</div>
         ${r.mom?`<div class="fixture-awards">⭐ ${r.mom} &nbsp;·&nbsp; 💩 ${r.dod||'—'}</div>`:''}
       </div>`;
+    div.addEventListener('click',()=>openFixtureDetail(r));
     list.appendChild(div);
   });
+}
+
+async function openFixtureDetail(r){
+  const overlay=document.getElementById('fix-detail-overlay');
+  const body=document.getElementById('fix-detail-body');
+  body.innerHTML='<div class="loading" style="padding-top:60px"><div class="spinner"></div><br>Loading...</div>';
+  overlay.classList.add('open');
+  document.body.style.overflow='hidden';
+
+  const d=new Date(r.match_date);
+  const dateStr=d.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  const isPast=!!r.result;
+
+  // Fetch player stats for this fixture
+  const{data:players}=await sb.from('match_stats').select('*').eq('fixture_id',r.id).order('goals',{ascending:false});
+  const pts=players||[];
+
+  let scoreHtml='';
+  if(isPast){
+    const sc=r.result;
+    scoreHtml=`
+      <div class="fsh-score score-${sc}">${r.whc_goals} — ${r.opp_goals}</div>
+      <div class="fsh-result score-${sc}">${sc==='W'?'Victory':sc==='L'?'Defeat':'Draw'}</div>`;
+  } else {
+    scoreHtml=`<div class="fsh-score score-upcoming">vs</div><div style="font-size:12px;color:#555;margin-top:4px">Upcoming</div>`;
+  }
+
+  let awardsHtml='';
+  if(r.mom||r.dod){
+    awardsHtml=`<div class="fix-awards-row">
+      <div class="fix-award-card mom"><div class="fac-label">⭐ Man of the Match</div><div class="fac-name">${r.mom||'—'}</div></div>
+      <div class="fix-award-card dod"><div class="fac-label">💩 Dick of the Day</div><div class="fac-name">${r.dod||'—'}</div></div>
+    </div>`;
+  }
+
+  let playersHtml='';
+  if(pts.length){
+    const rows=pts.map(p=>{
+      const isMom=r.mom&&p.player_name===r.mom;
+      const isDod=r.dod&&p.player_name===r.dod;
+      const cards=[
+        ...Array(p.green_cards||0).fill('<span class="fpr-card green"></span>'),
+        ...Array(p.yellow_cards||0).fill('<span class="fpr-card yellow"></span>'),
+        ...Array(p.red_cards||0).fill('<span class="fpr-card red"></span>'),
+      ].join('');
+      const g=p.goals||0,a=p.assists||0;
+      return `<div class="fix-player-row${isMom?' is-mom':''}${isDod?' is-dod':''}">
+        <span class="fpr-name">${p.player_name}${isMom?'<span class="fpr-badge mom">MOM</span>':''}${isDod?'<span class="fpr-badge dod">DOD</span>':''}</span>
+        <div class="fpr-stats">
+          <div class="fpr-stat${g>0?' has-val':''}"><span>${g}</span><span>Goals</span></div>
+          <div class="fpr-stat${a>0?' has-val':''}"><span>${a}</span><span>Asts</span></div>
+          <div class="fpr-stat" style="min-width:36px">${cards||'<span style="color:#333;font-size:11px">—</span>'}</div>
+        </div>
+      </div>`;
+    }).join('');
+    playersHtml=`<div class="fix-players-section"><h3>Squad</h3>${rows}</div>`;
+  } else if(isPast){
+    playersHtml=`<div class="fix-players-section"><p class="empty" style="padding:16px 0">No player stats recorded.</p></div>`;
+  }
+
+  body.innerHTML=`
+    <div class="fix-score-hero">
+      <div class="fsh-date">${dateStr}</div>
+      <div class="fsh-opponent">${r.opponent}</div>
+      ${scoreHtml}
+      <div class="fsh-meta">
+        ${r.venue?`<span>📍 ${r.venue}</span>`:''}
+        ${r.kick_off_time?`<span>🕐 ${r.kick_off_time}</span>`:''}
+      </div>
+    </div>
+    ${awardsHtml}
+    ${playersHtml}`;
+}
+
+function closeFixtureDetail(){
+  const overlay=document.getElementById('fix-detail-overlay');
+  const panel=document.getElementById('fix-detail-panel');
+  panel.style.transform='scale(0.92)';panel.style.opacity='0';
+  setTimeout(()=>{overlay.classList.remove('open');panel.style.transform='';panel.style.opacity='';document.body.style.overflow='';},280);
 }
 
 // ── FINE ──────────────────────────────────────────────────────
