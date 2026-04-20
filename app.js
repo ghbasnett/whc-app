@@ -9,6 +9,8 @@ let currentSeason='2025-26',statsData=[],currentSort='ppg';
 let wheelReady=false,spinning=false,wheelAngle=0,audioCtx=null,spinNodes=[];
 let meetingPwHash=null,captainPwHash=null,captainAuthed=false;
 let tsSquad=[];
+let vsSquad=[];            // captain vote setup: squad with selected state
+let currentVoteSession=null; // currently open session on the public vote page
 
 // ── PLAYER LOADER ────────────────────────────────────────────
 async function loadPlayersFromDB(){
@@ -34,7 +36,7 @@ function showSection(id,btn){
   if(id==='stats')loadStats();
   if(id==='fixtures')loadFixtures();
   if(id==='fine')loadFines();
-  if(id==='match')loadFixtureDropdown();
+  if(id==='vote')loadOpenVoteSession();
 }
 function onSeasonChange(){
   currentSeason=document.getElementById('season-sel').value;
@@ -43,6 +45,7 @@ function onSeasonChange(){
   const id=active.id.replace('sec-','');
   if(id==='stats')loadStats();
   if(id==='fixtures')loadFixtures();
+  if(id==='vote')loadOpenVoteSession();
 }
 function showMtab(id,btn){
   document.querySelectorAll('.msection').forEach(s=>s.classList.remove('active'));
@@ -64,7 +67,6 @@ function openCaptainPortal(){
 function closeCaptainPortal(){
   document.getElementById('captain-modal').classList.remove('open');
 }
-// Close on backdrop click
 document.getElementById('captain-modal').addEventListener('click',function(e){
   if(e.target===this)closeCaptainPortal();
 });
@@ -79,20 +81,260 @@ async function checkCaptainPw(){
     document.getElementById('cp-pw-wrap').style.display='none';
     document.getElementById('cp-content').style.display='block';
     loadTsSquad();
+    loadVsData();
+    loadFixtureDropdown();
   } else {
     document.getElementById('cp-pw-err').textContent='Incorrect password.';
+  }
+}
+
+// Switch between Teamsheet / Start Vote / Quick Entry tabs
+function showCpTab(id,btn){
+  document.querySelectorAll('.cp-tab-content').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.cp-tab').forEach(b=>b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+  if(id==='cp-votesetup')loadVsData();
+  if(id==='cp-quickstats')loadFixtureDropdown();
+}
+
+// ── CAPTAIN VOTE SETUP ───────────────────────────────────────
+async function loadVsData(){
+  // Populate fixture dropdown (open fixtures = no result set)
+  const{data:fixtures}=await sb.from('fixtures')
+    .select('id,match_date,opponent,result,whc_goals,opp_goals')
+    .eq('season',currentSeason)
+    .order('match_date',{ascending:false});
+  const sel=document.getElementById('vs-fixture');
+  sel.innerHTML='<option value="">— Select fixture —</option>';
+  (fixtures||[]).forEach(f=>{
+    const d=new Date(f.match_date+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+    const o=document.createElement('option');
+    o.value=f.id;
+    o.textContent=`${d} — ${f.opponent}${f.result?' ('+f.result+')':''}`;
+    sel.appendChild(o);
+  });
+
+  // Load squad from DB for "who played" ticklist
+  const{data:players}=await sb.from('players').select('name').eq('active',true).order('sort_order',{ascending:true});
+  vsSquad=(players||[]).map(p=>({name:p.name,selected:false}));
+  renderVsSquad();
+
+  // Load any existing open sessions so captain sees them
+  refreshVsExistingSessions();
+}
+
+function renderVsSquad(){
+  const list=document.getElementById('vs-squadList');
+  list.innerHTML='';
+  vsSquad.forEach((p,idx)=>{
+    const row=document.createElement('div');
+    row.className='ts-squad-row'+(p.selected?' selected':'');
+    row.style.cursor='pointer';
+    const cb=document.createElement('input');cb.type='checkbox';cb.checked=p.selected;
+    cb.addEventListener('change',()=>{vsSquad[idx].selected=cb.checked;row.classList.toggle('selected',cb.checked);updateVsCount();});
+    row.addEventListener('click',(e)=>{if(e.target===cb)return;cb.checked=!cb.checked;cb.dispatchEvent(new Event('change'));});
+    const nm=document.createElement('span');nm.className='ts-squad-name';nm.textContent=p.name;
+    row.appendChild(cb);row.appendChild(nm);
+    list.appendChild(row);
+  });
+  updateVsCount();
+}
+function updateVsCount(){
+  const n=vsSquad.filter(p=>p.selected).length;
+  document.getElementById('vs-selectedCount').textContent=n+' selected';
+}
+
+async function refreshVsExistingSessions(){
+  const{data:sessions}=await sb.from('match_vote_sessions')
+    .select('id,fixture_id,status,created_at,fixtures!inner(opponent,match_date,season)')
+    .eq('status','open')
+    .eq('fixtures.season',currentSeason)
+    .order('created_at',{ascending:false});
+  const wrap=document.getElementById('vs-existing-wrap');
+  const card=document.getElementById('vs-existing-card');
+  if(!sessions||!sessions.length){wrap.style.display='none';return;}
+  const s=sessions[0];  // most recent only (we only allow one open at a time practically)
+  // Count votes cast
+  const{count}=await sb.from('match_votes').select('*',{count:'exact',head:true}).eq('session_id',s.id);
+  const d=new Date(s.fixtures.match_date+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+  card.innerHTML=`
+    <div class="vs-existing-info">
+      <div class="ve-row"><span>Fixture</span><strong>${d} — ${s.fixtures.opponent}</strong></div>
+      <div class="ve-row"><span>Votes cast</span><span class="vs-existing-count">${count||0}</span></div>
+      <div class="vs-existing-actions">
+        <button class="vs-btn-sm danger" onclick="cancelVoteSession(${s.id})">Cancel / Close</button>
+      </div>
+    </div>`;
+  wrap.style.display='block';
+}
+
+function onVsFixtureChange(){
+  // Prefill score from fixture if already entered
+  const sel=document.getElementById('vs-fixture');
+  if(!sel.value)return;
+  const opt=sel.options[sel.selectedIndex];
+  // We didn't store score on the option; re-fetch it from DB cheaply
+  sb.from('fixtures').select('whc_goals,opp_goals').eq('id',sel.value).single().then(({data})=>{
+    if(data){
+      if(data.whc_goals!=null)document.getElementById('vs-gf').value=data.whc_goals;
+      if(data.opp_goals!=null)document.getElementById('vs-ga').value=data.opp_goals;
+    }
+  });
+}
+
+async function openVoteSession(){
+  const fixId=document.getElementById('vs-fixture').value;
+  const gf=parseInt(document.getElementById('vs-gf').value)||0;
+  const ga=parseInt(document.getElementById('vs-ga').value)||0;
+  const eligible=vsSquad.filter(p=>p.selected).map(p=>p.name);
+  const al=document.getElementById('vs-alert');
+  if(!fixId){showAlert(al,'error','Pick a fixture first.');return;}
+  if(!eligible.length){showAlert(al,'error','Tick at least one player as having played.');return;}
+  const btn=document.getElementById('vs-open-btn');btn.disabled=true;btn.textContent='Opening...';
+  try{
+    // Upsert so running this twice on same fixture doesn't error (overwrites eligible list + score)
+    const{error}=await sb.from('match_vote_sessions').upsert({
+      fixture_id:parseInt(fixId),
+      status:'open',
+      eligible_players:eligible,
+      whc_goals:gf,
+      opp_goals:ga
+    },{onConflict:'fixture_id'});
+    if(error)throw error;
+    showAlert(al,'success',`Voting opened — ${eligible.length} players eligible. Share the Vote tab with the squad!`);
+    vsSquad.forEach(p=>p.selected=false);renderVsSquad();
+    document.getElementById('vs-fixture').value='';
+    document.getElementById('vs-gf').value='0';
+    document.getElementById('vs-ga').value='0';
+    refreshVsExistingSessions();
+  }catch(e){showAlert(al,'error','Failed: '+e.message);}
+  btn.disabled=false;btn.textContent='🗳 Open Voting';
+}
+
+async function cancelVoteSession(sessionId){
+  if(!confirm('Cancel this voting session? All submitted votes will be deleted. This cannot be undone.'))return;
+  try{
+    // Delete session (cascade deletes votes)
+    await sb.from('match_vote_sessions').delete().eq('id',sessionId);
+    refreshVsExistingSessions();
+    showAlert(document.getElementById('vs-alert'),'success','Voting session cancelled.');
+  }catch(e){showAlert(document.getElementById('vs-alert'),'error','Failed: '+e.message);}
+}
+
+// ── PUBLIC VOTE PAGE ─────────────────────────────────────────
+async function loadOpenVoteSession(){
+  document.getElementById('vote-loading').style.display='block';
+  document.getElementById('vote-none').style.display='none';
+  document.getElementById('vote-form').style.display='none';
+  document.getElementById('vote-done').style.display='none';
+
+  const{data,error}=await sb.from('match_vote_sessions')
+    .select('id,fixture_id,eligible_players,whc_goals,opp_goals,status,fixtures!inner(opponent,match_date,season)')
+    .eq('status','open')
+    .eq('fixtures.season',currentSeason)
+    .order('created_at',{ascending:false})
+    .limit(1);
+
+  document.getElementById('vote-loading').style.display='none';
+
+  if(error){
+    console.error('Vote load error:',error);
+    document.getElementById('vote-none').style.display='block';
+    return;
+  }
+  if(!data||!data.length){
+    document.getElementById('vote-none').style.display='block';
+    currentVoteSession=null;
+    return;
+  }
+
+  currentVoteSession=data[0];
+  renderVoteForm();
+}
+
+function renderVoteForm(){
+  const s=currentVoteSession;
+  const d=new Date(s.fixtures.match_date+'T00:00:00');
+  const dateStr=d.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'});
+  const result=s.whc_goals>s.opp_goals?'W':s.whc_goals<s.opp_goals?'L':'D';
+  const resultLabel=result==='W'?'Victory':result==='L'?'Defeat':'Draw';
+
+  document.getElementById('vote-fixture-card').innerHTML=`
+    <div class="vote-fix">
+      <div class="vf-date">${dateStr}</div>
+      <div class="vf-opp">vs ${s.fixtures.opponent}</div>
+      <div class="vf-score">${s.whc_goals} — ${s.opp_goals}</div>
+      <div class="vf-sub">${resultLabel} · ${s.eligible_players.length} players eligible</div>
+    </div>`;
+
+  // Populate MOM and DOD dropdowns
+  // Order: eligible players first (as captain ticked), then any remaining full-squad players
+  const eligible=new Set(s.eligible_players);
+  const rest=PLAYERS.filter(p=>!eligible.has(p));
+  const orderedList=[...s.eligible_players,...rest];
+
+  ['vote-mom','vote-dod'].forEach(id=>{
+    const sel=document.getElementById(id);
+    const placeholder=id==='vote-mom'?'— Pick your MOM —':'— Pick your DOD —';
+    sel.innerHTML=`<option value="">${placeholder}</option>`;
+    // Group label: played
+    if(s.eligible_players.length){
+      const og=document.createElement('optgroup');og.label='Played this match';
+      s.eligible_players.forEach(p=>{const o=document.createElement('option');o.value=o.textContent=p;og.appendChild(o);});
+      sel.appendChild(og);
+    }
+    if(rest.length){
+      const og2=document.createElement('optgroup');og2.label='Other squad members';
+      rest.forEach(p=>{const o=document.createElement('option');o.value=o.textContent=p;og2.appendChild(o);});
+      sel.appendChild(og2);
+    }
+  });
+
+  // Clear any previous form state
+  document.getElementById('vote-mom').value='';
+  document.getElementById('vote-dod').value='';
+  document.getElementById('vote-mom-reason').value='';
+  document.getElementById('vote-dod-reason').value='';
+
+  document.getElementById('vote-form').style.display='block';
+}
+
+async function submitVote(){
+  if(!currentVoteSession)return;
+  const mom=document.getElementById('vote-mom').value;
+  const momReason=document.getElementById('vote-mom-reason').value.trim();
+  const dod=document.getElementById('vote-dod').value;
+  const dodReason=document.getElementById('vote-dod-reason').value.trim();
+  const al=document.getElementById('vote-alert');
+  if(!mom||!momReason||!dod||!dodReason){
+    showAlert(al,'error','All four fields are required.');return;
+  }
+  const btn=document.getElementById('vote-submit-btn');btn.disabled=true;btn.textContent='Submitting...';
+  try{
+    const{error}=await sb.from('match_votes').insert({
+      session_id:currentVoteSession.id,
+      mom_vote:mom,
+      mom_reason:momReason,
+      dod_vote:dod,
+      dod_reason:dodReason
+    });
+    if(error)throw error;
+    document.getElementById('vote-form').style.display='none';
+    document.getElementById('vote-done').style.display='block';
+  }catch(e){
+    showAlert(al,'error','Failed: '+e.message);
+    btn.disabled=false;btn.textContent='Submit Vote (Anonymous)';
   }
 }
 
 // ── TEAMSHEET ─────────────────────────────────────────────────
 async function loadTsSquad(){
   document.getElementById('ts-squad-hint').textContent='Loading players...';
-  // Load players
   const{data:players,error}=await sb.from('players').select('name,role').eq('active',true).order('sort_order',{ascending:true});
   if(error||!players){document.getElementById('ts-squad-hint').textContent='Failed to load players.';return;}
   tsSquad=players.map(p=>({name:p.name,role:p.role,selected:false}));
   document.getElementById('ts-squad-hint').textContent='Tick players playing this week. GK = #1, captain = ©, players from #3 up.';
-  // Load upcoming fixtures
   const{data:fixtures}=await sb.from('fixtures').select('id,match_date,opponent,venue,kick_off_time').is('result',null).eq('season',currentSeason).order('match_date',{ascending:true});
   const sel=document.getElementById('ts-fixture-sel');
   sel.innerHTML='<option value="">— Select fixture —</option>';
@@ -214,11 +456,8 @@ function tsSetMode(mode){
   }
 }
 
-// Listen for edit changes
 document.getElementById('ts-editPanel').addEventListener('input',()=>tsRenderPreview());
 document.getElementById('ts-editPanel').addEventListener('change',()=>tsRenderPreview());
-
-
 
 // ── STEPPER ───────────────────────────────────────────────────
 function makeStepper(cls,tint){
@@ -261,7 +500,7 @@ async function init(){
   loadStats();
 }
 
-// ── FIXTURE DROPDOWN ──────────────────────────────────────────
+// ── FIXTURE DROPDOWN (Quick Entry tab) ─────────────────────
 async function loadFixtureDropdown(){
   const{data}=await sb.from('fixtures').select('id,match_date,opponent,result,season').eq('season',currentSeason).order('match_date',{ascending:true});
   if(!data)return;
@@ -346,7 +585,6 @@ async function openFixtureDetail(r){
   const dateStr=d.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   const isPast=!!r.result;
 
-  // Fetch player stats for this fixture
   const{data:players}=await sb.from('match_stats').select('*').eq('fixture_id',r.id).order('goals',{ascending:false});
   const pts=players||[];
 
@@ -449,7 +687,7 @@ async function submitFine(){
   btn.disabled=false;
 }
 
-// ── MATCH ─────────────────────────────────────────────────────
+// ── MATCH (Quick Entry fallback — inside Captain's Portal) ──
 async function submitMatch(){
   const fixId=document.getElementById('m-fixture').value;
   const gf=parseInt(document.getElementById('m-gf').value)||0;
@@ -458,7 +696,7 @@ async function submitMatch(){
   const dod=document.getElementById('m-dod').value;
   const al=document.getElementById('match-alert');
   if(!fixId){showAlert(al,'error','Please select a fixture.');return;}
-  const btn=document.querySelector('#sec-match .submit-btn');btn.disabled=true;btn.textContent='Saving...';
+  const btn=document.querySelector('#cp-quickstats .submit-btn');btn.disabled=true;btn.textContent='Saving...';
   const result=gf>ga?'W':gf<ga?'L':'D';
   const pts=result==='W'?3:result==='D'?1:0;
   try{
