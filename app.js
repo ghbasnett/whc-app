@@ -11,6 +11,12 @@ let meetingPwHash=null,captainPwHash=null,captainAuthed=false;
 let tsSquad=[];
 let vsSquad=[];            // captain vote setup: squad with selected state
 let currentVoteSession=null; // currently open session on the public vote page
+// REVEAL state
+let rvSession=null;        // currently loaded session for reveal
+let rvVotes=[];            // all votes for this session (full list with revealed flags)
+let rvRevealing=false;     // lock while animation in progress
+let rvMomTally={};         // {playerName:count}
+let rvDodTally={};
 
 // ── PLAYER LOADER ────────────────────────────────────────────
 async function loadPlayersFromDB(){
@@ -54,6 +60,7 @@ function showMtab(id,btn){
   if(id==='m-wheel')setTimeout(initWheel,50);
   if(id==='m-predictions')loadPredictions();
   if(id==='m-ind-fines')renderIndFines();
+  if(id==='m-reveal')loadRevealFixtures();
 }
 
 // ── CAPTAIN'S PORTAL ─────────────────────────────────────────
@@ -847,7 +854,310 @@ function rollDice(){
   },80);
 }
 
-// ── UTILS ─────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════
+// REVEAL — MOM/DOD paper ball theatre
+// ══════════════════════════════════════════════════════════
+
+async function loadRevealFixtures(){
+  const sel=document.getElementById('rv-fixture-sel');
+  sel.innerHTML='<option value="">— Select match —</option>';
+  document.getElementById('rv-stage').style.display='none';
+  document.getElementById('rv-picker-hint').textContent='Loading...';
+
+  // Fetch all sessions in this season (any status — we want to handle already-revealed too)
+  const{data,error}=await sb.from('match_vote_sessions')
+    .select('id,fixture_id,status,whc_goals,opp_goals,eligible_players,fixtures!inner(opponent,match_date,season)')
+    .eq('fixtures.season',currentSeason)
+    .order('created_at',{ascending:false});
+
+  if(error){
+    document.getElementById('rv-picker-hint').textContent='Failed to load sessions.';
+    return;
+  }
+  if(!data||!data.length){
+    document.getElementById('rv-picker-hint').textContent='No voting sessions found for this season. Captains need to open a vote first.';
+    return;
+  }
+
+  data.forEach(s=>{
+    const d=new Date(s.fixtures.match_date+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+    const tag=s.status==='complete'?' ✓':s.status==='open'?' 🗳':'';
+    const opt=document.createElement('option');
+    opt.value=s.id;
+    opt.textContent=`${d} — ${s.fixtures.opponent}${tag}`;
+    sel.appendChild(opt);
+  });
+  document.getElementById('rv-picker-hint').textContent='🗳 = open for voting · ✓ = already finalised';
+}
+
+async function onRvFixtureChange(){
+  const sessionId=document.getElementById('rv-fixture-sel').value;
+  if(!sessionId){document.getElementById('rv-stage').style.display='none';return;}
+
+  // Load full session + votes
+  const{data:session}=await sb.from('match_vote_sessions')
+    .select('id,fixture_id,status,whc_goals,opp_goals,eligible_players,fixtures!inner(opponent,match_date)')
+    .eq('id',sessionId).single();
+  const{data:votes}=await sb.from('match_votes')
+    .select('*').eq('session_id',sessionId).order('created_at',{ascending:true});
+
+  rvSession=session;
+  rvVotes=votes||[];
+
+  // Rebuild tallies from already-revealed votes (handles page refresh mid-reveal)
+  rvMomTally={};rvDodTally={};
+  rvVotes.filter(v=>v.revealed).forEach(v=>{
+    rvMomTally[v.mom_vote]=(rvMomTally[v.mom_vote]||0)+1;
+    rvDodTally[v.dod_vote]=(rvDodTally[v.dod_vote]||0)+1;
+  });
+
+  document.getElementById('rv-stage').style.display='block';
+  renderRevealPile();
+  renderTally('mom');
+  renderTally('dod');
+
+  // If all revealed already, show confirm section straight away
+  const unrevealed=rvVotes.filter(v=>!v.revealed);
+  if(rvVotes.length>0 && unrevealed.length===0){
+    showConfirmWinners();
+  } else {
+    document.getElementById('rv-confirm').style.display='none';
+  }
+}
+
+function renderRevealPile(){
+  const pile=document.getElementById('rv-pile');
+  const status=document.getElementById('rv-pile-status');
+  const hint=document.getElementById('rv-pile-hint');
+  pile.innerHTML='';
+  const unrevealed=rvVotes.filter(v=>!v.revealed);
+
+  if(rvVotes.length===0){
+    status.textContent='No votes submitted';
+    pile.innerHTML='<p class="rv-pile-empty">No paper balls in the pile — nobody voted for this match.</p>';
+    hint.style.display='none';
+    return;
+  }
+
+  status.textContent=unrevealed.length+' vote'+(unrevealed.length===1?'':'s')+' left';
+
+  if(unrevealed.length===0){
+    pile.innerHTML='<p class="rv-pile-empty">✓ All votes revealed — confirm winners below.</p>';
+    hint.style.display='none';
+    return;
+  }
+
+  hint.style.display='block';
+  unrevealed.forEach(v=>{
+    const ball=document.createElement('div');
+    ball.className='rv-ball';
+    ball.style.animationDelay=(Math.random()*0.3).toFixed(2)+'s';
+    ball.innerHTML='<div class="rv-ball-shape"></div>';
+    ball.addEventListener('click',()=>revealOneVote(v.id,ball));
+    pile.appendChild(ball);
+  });
+}
+
+function renderTally(kind){
+  const tally=kind==='mom'?rvMomTally:rvDodTally;
+  const body=document.getElementById('rv-'+kind+'-tally');
+  const totalEl=document.getElementById('rv-'+kind+'-total');
+  const entries=Object.entries(tally).sort((a,b)=>b[1]-a[1]);
+  const total=entries.reduce((s,[,c])=>s+c,0);
+  totalEl.textContent=total+' vote'+(total===1?'':'s');
+  if(!entries.length){body.innerHTML='<div class="empty-tally">No votes yet</div>';return;}
+  const topCount=entries[0][1];
+  body.innerHTML=entries.map(([name,count],i)=>{
+    const isLeader=count===topCount;
+    return `<div class="rv-tally-row${isLeader?' leader':''}" data-name="${name.replace(/"/g,'&quot;')}">
+      <span class="rt-rank">${i+1}</span>
+      <span class="rt-name">${name}</span>
+      <span class="rt-count">${count}</span>
+    </div>`;
+  }).join('');
+}
+
+async function revealOneVote(voteId,ballEl){
+  if(rvRevealing)return;
+  rvRevealing=true;
+
+  const vote=rvVotes.find(v=>v.id===voteId);
+  if(!vote){rvRevealing=false;return;}
+
+  // Mark revealed in DB first (optimistic)
+  try{
+    await sb.from('match_votes').update({revealed:true,revealed_at:new Date().toISOString()}).eq('id',voteId);
+  }catch(e){
+    console.error('Failed to mark revealed:',e);
+    rvRevealing=false;
+    return;
+  }
+  vote.revealed=true;
+
+  // Update tallies
+  rvMomTally[vote.mom_vote]=(rvMomTally[vote.mom_vote]||0)+1;
+  rvDodTally[vote.dod_vote]=(rvDodTally[vote.dod_vote]||0)+1;
+
+  // Ball fades from pile
+  ballEl.querySelector('.rv-ball-shape').classList.add('discarded');
+
+  // Open full-screen overlay
+  const overlay=document.getElementById('rv-overlay');
+  const bigBall=document.getElementById('rv-ball-big');
+  const paper=document.getElementById('rv-paper');
+  const doneBtn=document.getElementById('rv-done-btn');
+
+  // Populate paper content
+  document.getElementById('rv-paper-mom-name').textContent=vote.mom_vote;
+  document.getElementById('rv-paper-mom-reason').textContent='"'+vote.mom_reason+'"';
+  document.getElementById('rv-paper-dod-name').textContent=vote.dod_vote;
+  document.getElementById('rv-paper-dod-reason').textContent='"'+vote.dod_reason+'"';
+
+  // Reset animation states
+  bigBall.className='rv-ball-big';
+  paper.className='rv-paper';
+  doneBtn.style.display='none';
+  void bigBall.offsetWidth;  // force reflow
+
+  overlay.classList.add('open');
+
+  // Stage 1: ball flies in
+  setTimeout(()=>bigBall.classList.add('animating'),50);
+  // Stage 2: ball unfolds (after 0.7s)
+  setTimeout(()=>bigBall.classList.add('unfolding'),750);
+  // Stage 3: paper reveals (triggered by its own animation-delay in CSS)
+  setTimeout(()=>paper.classList.add('reveal'),800);
+  // Stage 4: show done button
+  setTimeout(()=>{doneBtn.style.display='inline-block';},1700);
+}
+
+function dismissReveal(){
+  const overlay=document.getElementById('rv-overlay');
+  overlay.classList.remove('open');
+  rvRevealing=false;
+
+  // Remove the ball element from pile (it animated out)
+  setTimeout(()=>{
+    // Re-render pile to sync — discarded ball is removed, count updates
+    renderRevealPile();
+    renderTally('mom');
+    renderTally('dod');
+
+    // Check if all revealed now
+    const unrevealed=rvVotes.filter(v=>!v.revealed);
+    if(unrevealed.length===0 && rvVotes.length>0){
+      showConfirmWinners();
+    }
+  },250);
+}
+
+function showConfirmWinners(){
+  const momEntries=Object.entries(rvMomTally).sort((a,b)=>b[1]-a[1]);
+  const dodEntries=Object.entries(rvDodTally).sort((a,b)=>b[1]-a[1]);
+  const momLeader=momEntries[0]?momEntries[0][0]:'';
+  const dodLeader=dodEntries[0]?dodEntries[0][0]:'';
+
+  // Populate dropdowns — full player list, leaders first
+  const buildDropdown=(id,leader)=>{
+    const sel=document.getElementById(id);
+    sel.innerHTML='';
+    const all=new Set([...PLAYERS,...Object.keys(rvMomTally),...Object.keys(rvDodTally)]);
+    const ordered=[leader,...Array.from(all).filter(n=>n!==leader).sort()];
+    ordered.filter(Boolean).forEach(n=>{
+      const o=document.createElement('option');o.value=o.textContent=n;
+      if(n===leader)o.selected=true;
+      sel.appendChild(o);
+    });
+  };
+  buildDropdown('rv-mom-winner',momLeader);
+  buildDropdown('rv-dod-winner',dodLeader);
+
+  // Render stats grid with only eligible players
+  const tbody=document.getElementById('rv-stats-rows');
+  tbody.innerHTML='';
+  const eligible=rvSession.eligible_players||[];
+  // Fallback: if no eligible list, show all players
+  const rowList=eligible.length?eligible:PLAYERS;
+  rowList.forEach(p=>{
+    const tr=document.createElement('tr');tr.dataset.player=p;
+    tr.innerHTML=`<td style="padding-left:10px;text-align:left;font-size:12px;font-weight:600;color:#fff;">${p}</td>`;
+    [['p-goals',''],['p-assists',''],['p-green','green-s'],['p-yellow','yellow-s'],['p-red','red-s']].forEach(([cls,tint])=>{
+      const td=document.createElement('td');td.appendChild(makeStepper(cls,tint));tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('rv-confirm').style.display='block';
+}
+
+async function finaliseReveal(){
+  if(!rvSession)return;
+  const mom=document.getElementById('rv-mom-winner').value;
+  const dod=document.getElementById('rv-dod-winner').value;
+  const al=document.getElementById('rv-alert');
+  if(!mom||!dod){showAlert(al,'error','Both MOM and DOD must be selected.');return;}
+
+  const btn=document.getElementById('rv-submit-btn');btn.disabled=true;btn.textContent='Saving...';
+
+  const gf=rvSession.whc_goals||0,ga=rvSession.opp_goals||0;
+  const result=gf>ga?'W':gf<ga?'L':'D';
+  const pts=result==='W'?3:result==='D'?1:0;
+
+  try{
+    // 1. Update fixtures row
+    const{error:fe}=await sb.from('fixtures').update({
+      whc_goals:gf,opp_goals:ga,result,match_points:pts,mom,dod
+    }).eq('id',rvSession.fixture_id);
+    if(fe)throw fe;
+
+    // 2. Build match_stats inserts
+    const rows=document.querySelectorAll('#rv-stats-rows tr');
+    const inserts=[];
+    rows.forEach(row=>{
+      const player=row.dataset.player;
+      inserts.push({
+        fixture_id:rvSession.fixture_id,
+        player_name:player,
+        season:currentSeason,
+        goals:getVal(row,'p-goals'),
+        assists:getVal(row,'p-assists'),
+        mom_votes:rvMomTally[player]||0,
+        dod_votes:rvDodTally[player]||0,
+        green_cards:getVal(row,'p-green'),
+        yellow_cards:getVal(row,'p-yellow'),
+        red_cards:getVal(row,'p-red'),
+        match_points:pts,
+        is_mom:player===mom,
+        is_dod:player===dod
+      });
+    });
+    if(inserts.length){
+      // Delete any existing rows for this fixture first (in case of re-finalise)
+      await sb.from('match_stats').delete().eq('fixture_id',rvSession.fixture_id);
+      const{error:se}=await sb.from('match_stats').insert(inserts);
+      if(se)throw se;
+    }
+
+    // 3. Mark session complete
+    await sb.from('match_vote_sessions').update({
+      status:'complete',
+      completed_at:new Date().toISOString()
+    }).eq('id',rvSession.id);
+
+    showAlert(al,'success',`Match finalised! ${inserts.length} players recorded. MOM: ${mom} · DOD: ${dod}`);
+    btn.textContent='✓ Saved';
+    setTimeout(()=>{
+      document.getElementById('rv-fixture-sel').value='';
+      document.getElementById('rv-stage').style.display='none';
+      loadRevealFixtures();
+    },2000);
+  }catch(e){
+    showAlert(al,'error','Failed: '+e.message);
+    btn.disabled=false;btn.textContent='🏁 Finalise Match';
+  }
+}
+
+
 
 function showAlert(el,type,msg){el.className=`alert ${type} show`;el.textContent=msg;setTimeout(()=>el.classList.remove('show'),4000);}
 
