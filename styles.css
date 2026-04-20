@@ -316,6 +316,15 @@ body{background:var(--dark);color:var(--white);font-family:'Outfit',sans-serif;m
 .vs-btn-sm.danger{border-color:rgba(244,67,54,0.35);color:#f44336;}
 .vs-btn-sm.danger:hover{background:rgba(244,67,54,0.1);}
 
+/* Vote page title row + Reveal button */
+.vote-title-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:10px;}
+.reveal-btn{background:linear-gradient(135deg,rgba(212,175,55,0.25),rgba(139,90,43,0.3));border:1px solid rgba(212,175,55,0.5);color:#d4af37;padding:7px 14px;border-radius:8px;font-family:'Outfit',sans-serif;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:1px;white-space:nowrap;transition:all 0.2s;animation:revealPulse 2s ease-in-out infinite;}
+.reveal-btn:hover{background:linear-gradient(135deg,rgba(212,175,55,0.4),rgba(139,90,43,0.5));color:#fff;transform:scale(1.03);}
+@keyframes revealPulse{0%,100%{box-shadow:0 0 0 0 rgba(212,175,55,0);}50%{box-shadow:0 0 14px 2px rgba(212,175,55,0.35);}}
+
+/* Reveal modal sizing — give more room than captain portal */
+.reveal-modal-box{max-width:700px;}
+
 /* ══════════════════════════════════════════════════════════
    REVEAL — the theatre
    ══════════════════════════════════════════════════════════ */
@@ -351,34 +360,20 @@ body{background:var(--dark);color:var(--white);font-family:'Outfit',sans-serif;m
 .rv-pile-empty{color:#555;font-size:13px;padding:20px;font-style:italic;}
 
 /* Individual scrunched paper ball in the pile */
-.rv-ball{width:44px;height:44px;position:relative;cursor:pointer;transition:transform 0.2s ease;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.4));animation:rvBallIn 0.4s ease backwards;}
-.rv-ball:hover{transform:translateY(-4px) rotate(8deg) scale(1.08);}
+.rv-ball{width:52px;height:52px;position:relative;cursor:pointer;transition:transform 0.2s ease;filter:drop-shadow(0 3px 4px rgba(0,0,0,0.5));animation:rvBallIn 0.4s ease backwards;display:inline-block;}
+.rv-ball svg{width:100%;height:100%;display:block;}
+.rv-ball:hover{transform:translateY(-5px) rotate(8deg) scale(1.1);}
 .rv-ball:active{transform:scale(0.95);}
 @keyframes rvBallIn{from{opacity:0;transform:scale(0.5);}to{opacity:1;transform:scale(1);}}
 
-/* Each ball is an SVG-like crumpled blob using multiple gradients */
-.rv-ball-shape{width:100%;height:100%;background:
-  radial-gradient(circle at 30% 30%,#fefcf5 0%,#f5f0e0 40%,#d8cfba 75%,#a89d88 100%);
-  border-radius:52% 48% 46% 54% / 50% 52% 48% 50%;
-  position:relative;overflow:hidden;}
-.rv-ball-shape::before{content:'';position:absolute;inset:0;background:
-  radial-gradient(ellipse 30% 20% at 25% 35%,rgba(0,0,0,0.12) 0%,transparent 70%),
-  radial-gradient(ellipse 25% 15% at 70% 60%,rgba(0,0,0,0.1) 0%,transparent 70%),
-  radial-gradient(ellipse 20% 12% at 45% 80%,rgba(0,0,0,0.08) 0%,transparent 70%),
-  linear-gradient(135deg,transparent 40%,rgba(255,255,255,0.3) 50%,transparent 60%),
-  linear-gradient(45deg,transparent 30%,rgba(0,0,0,0.05) 50%,transparent 70%);
-  border-radius:inherit;}
-.rv-ball-shape::after{content:'';position:absolute;inset:0;background:
-  linear-gradient(105deg,transparent 45%,rgba(255,255,255,0.5) 50%,transparent 55%),
-  linear-gradient(65deg,transparent 30%,rgba(0,0,0,0.08) 35%,transparent 40%);
-  border-radius:inherit;}
 /* Slight rotation variants for naturalism */
-.rv-ball:nth-child(3n+1){transform:rotate(-6deg);}
-.rv-ball:nth-child(3n+1):hover{transform:translateY(-4px) rotate(2deg) scale(1.08);}
-.rv-ball:nth-child(3n+2){transform:rotate(4deg);}
-.rv-ball:nth-child(3n+2):hover{transform:translateY(-4px) rotate(12deg) scale(1.08);}
-.rv-ball:nth-child(4n+3){transform:rotate(-2deg);}
-.rv-ball-shape.discarded{animation:rvBallDiscard 0.55s ease forwards;}
+.rv-ball:nth-child(3n+1){transform:rotate(-8deg);}
+.rv-ball:nth-child(3n+1):hover{transform:translateY(-5px) rotate(2deg) scale(1.1);}
+.rv-ball:nth-child(3n+2){transform:rotate(6deg);}
+.rv-ball:nth-child(3n+2):hover{transform:translateY(-5px) rotate(14deg) scale(1.1);}
+.rv-ball:nth-child(4n+3){transform:rotate(-3deg);}
+.rv-ball:nth-child(5n+4){transform:rotate(12deg);}
+.rv-ball.discarded{animation:rvBallDiscard 0.55s ease forwards;pointer-events:none;}
 @keyframes rvBallDiscard{
   0%{transform:scale(1) rotate(0);opacity:1;}
   40%{transform:scale(1.15) rotate(-10deg);}
@@ -386,27 +381,14 @@ body{background:var(--dark);color:var(--white);font-family:'Outfit',sans-serif;m
 }
 
 /* FULL-SCREEN REVEAL OVERLAY */
-.rv-overlay{position:fixed;inset:0;z-index:250;background:rgba(5,2,8,0.92);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;padding:20px;}
+.rv-overlay{position:fixed;inset:0;z-index:300;background:rgba(5,2,8,0.92);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;padding:20px;}
 .rv-overlay.open{display:flex;animation:rvOverlayIn 0.3s ease;}
 @keyframes rvOverlayIn{from{opacity:0;}to{opacity:1;}}
 .rv-overlay-inner{width:100%;max-width:520px;display:flex;flex-direction:column;align-items:center;gap:20px;position:relative;}
 
-/* Giant ball (before unfolding) */
-.rv-ball-big{width:min(260px,70vw);height:min(260px,70vw);position:relative;filter:drop-shadow(0 12px 28px rgba(0,0,0,0.6));background:
-  radial-gradient(circle at 30% 30%,#fefcf5 0%,#f5f0e0 40%,#d8cfba 75%,#a89d88 100%);
-  border-radius:52% 48% 46% 54% / 50% 52% 48% 50%;overflow:hidden;
-  transform:scale(0.3) rotate(-15deg);opacity:0;}
-.rv-ball-big::before{content:'';position:absolute;inset:0;background:
-  radial-gradient(ellipse 30% 20% at 25% 35%,rgba(0,0,0,0.15) 0%,transparent 70%),
-  radial-gradient(ellipse 25% 15% at 70% 60%,rgba(0,0,0,0.12) 0%,transparent 70%),
-  radial-gradient(ellipse 22% 14% at 50% 85%,rgba(0,0,0,0.1) 0%,transparent 70%),
-  radial-gradient(ellipse 18% 10% at 80% 25%,rgba(0,0,0,0.08) 0%,transparent 70%),
-  linear-gradient(135deg,transparent 35%,rgba(255,255,255,0.3) 50%,transparent 65%);
-  border-radius:inherit;}
-.rv-ball-big::after{content:'';position:absolute;inset:0;background:
-  linear-gradient(105deg,transparent 40%,rgba(255,255,255,0.45) 50%,transparent 60%),
-  linear-gradient(65deg,transparent 25%,rgba(0,0,0,0.1) 35%,transparent 45%);
-  border-radius:inherit;}
+/* Giant ball (before unfolding) — now using SVG */
+.rv-ball-big{width:min(280px,72vw);height:min(280px,72vw);position:relative;filter:drop-shadow(0 14px 32px rgba(0,0,0,0.7));transform:scale(0.3) rotate(-15deg);opacity:0;}
+.rv-ball-big svg{width:100%;height:100%;display:block;}
 .rv-ball-big.animating{animation:rvBallFlyIn 0.6s cubic-bezier(0.34,1.5,0.64,1) forwards;}
 @keyframes rvBallFlyIn{
   0%{transform:scale(0.3) rotate(-15deg);opacity:0;}
@@ -416,8 +398,8 @@ body{background:var(--dark);color:var(--white);font-family:'Outfit',sans-serif;m
 .rv-ball-big.unfolding{animation:rvBallUnfold 0.55s ease forwards;}
 @keyframes rvBallUnfold{
   0%{transform:scale(1) rotate(0);opacity:1;}
-  60%{transform:scale(1.2) rotate(180deg);opacity:0.5;filter:blur(2px);}
-  100%{transform:scale(1.8) rotate(360deg);opacity:0;filter:blur(8px);}
+  60%{transform:scale(1.2) rotate(180deg);opacity:0.5;filter:blur(2px) drop-shadow(0 14px 32px rgba(0,0,0,0.7));}
+  100%{transform:scale(1.8) rotate(360deg);opacity:0;filter:blur(8px) drop-shadow(0 14px 32px rgba(0,0,0,0.7));}
 }
 
 /* Unfolded paper */
