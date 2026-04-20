@@ -312,7 +312,11 @@
 
 <!-- VOTE -->
 <div id="sec-vote" class="section">
-  <div class="page-title">Cast Your Vote</div>
+  <div class="vote-title-row">
+    <div class="page-title" style="margin-bottom:0;border-bottom:none;padding-bottom:0;">Cast Your Vote</div>
+    <button class="reveal-btn" id="reveal-btn" onclick="openRevealFromVote()" style="display:none">🎭 Reveal</button>
+  </div>
+  <div style="border-bottom:2px solid var(--border);margin-bottom:14px;"></div>
   <p class="section-sub">Anonymous voting for Man of the Match and Dick of the Day.</p>
   <div class="alert" id="vote-alert"></div>
 
@@ -378,7 +382,6 @@
   <div id="meeting-content" style="display:none">
     <div class="meeting-tabs">
       <button class="mtab active" onclick="showMtab('m-schedule',this)">📅 Day</button>
-      <button class="mtab" onclick="showMtab('m-reveal',this)">🎭 Reveal</button>
       <button class="mtab" onclick="showMtab('m-housekeeping',this)">📋 Rules</button>
       <button class="mtab" onclick="showMtab('m-predictions',this)">📊 Preds</button>
       <button class="mtab" onclick="showMtab('m-ind-fines',this)">⚡ Fines</button>
@@ -395,86 +398,6 @@
       </ul></div>
     </div>
 
-    <!-- ── REVEAL TAB ─────────────────────────────────── -->
-    <div id="m-reveal" class="msection">
-      <div class="page-title" style="font-size:22px">MOM & DOD Reveal</div>
-
-      <!-- Fixture picker -->
-      <div class="card" id="rv-picker-card">
-        <div class="form-group">
-          <label>Match to reveal</label>
-          <select id="rv-fixture-sel" onchange="onRvFixtureChange()">
-            <option value="">— Select match —</option>
-          </select>
-        </div>
-        <p id="rv-picker-hint" style="font-size:11px;color:#666;font-style:italic;margin-top:6px;"></p>
-      </div>
-
-      <!-- Main reveal stage (hidden until fixture selected) -->
-      <div id="rv-stage" style="display:none">
-        <!-- Tally panels -->
-        <div class="rv-tally-wrap">
-          <div class="rv-tally">
-            <div class="rv-tally-header mom">
-              <span>🏆 MOM</span>
-              <span class="rv-tally-count" id="rv-mom-total">0 votes</span>
-            </div>
-            <div class="rv-tally-body" id="rv-mom-tally"></div>
-          </div>
-          <div class="rv-tally">
-            <div class="rv-tally-header dod">
-              <span>💩 DOD</span>
-              <span class="rv-tally-count" id="rv-dod-total">0 votes</span>
-            </div>
-            <div class="rv-tally-body" id="rv-dod-tally"></div>
-          </div>
-        </div>
-
-        <!-- Paper ball pile -->
-        <div class="rv-pile-wrap">
-          <div class="rv-pile-status" id="rv-pile-status"></div>
-          <div class="rv-pile" id="rv-pile"></div>
-          <p class="rv-pile-hint" id="rv-pile-hint">Click a ball to reveal</p>
-        </div>
-
-        <!-- All revealed → confirm winners -->
-        <div class="rv-confirm" id="rv-confirm" style="display:none">
-          <div class="step-badge" style="background:#4caf50">ALL REVEALED — CONFIRM WINNERS</div>
-          <div class="card">
-            <div class="form-group">
-              <label>Man of the Match</label>
-              <select id="rv-mom-winner"></select>
-            </div>
-            <div class="form-group">
-              <label>Dick of the Day</label>
-              <select id="rv-dod-winner"></select>
-            </div>
-            <p style="font-size:11px;color:#666;font-style:italic;">Pre-filled with the leader. Change if there's a tie or captain's call.</p>
-          </div>
-
-          <div class="step-badge">PLAYER STATS</div>
-          <div class="card" style="padding:12px 8px;">
-            <div class="ts-squad-hint" style="padding:0 6px 8px;">Enter goals, assists and cards for players who played.</div>
-            <div class="match-stats-scroll">
-              <table class="match-stats-table">
-                <thead><tr>
-                  <th>Player</th>
-                  <th>⚽ G</th><th>🎯 A</th>
-                  <th style="color:#4caf50">GRN</th>
-                  <th style="color:#ffc107">YLW</th>
-                  <th style="color:#f44336">RED</th>
-                </tr></thead>
-                <tbody id="rv-stats-rows"></tbody>
-              </table>
-            </div>
-          </div>
-
-          <div class="alert" id="rv-alert"></div>
-          <button class="submit-btn" onclick="finaliseReveal()" id="rv-submit-btn">🏁 Finalise Match</button>
-        </div>
-      </div>
-    </div>
-    <!-- ── END REVEAL TAB ───────────────────────────── -->
     <div id="m-housekeeping" class="msection">
       <div class="page-title" style="font-size:22px">Housekeeping</div>
       <div class="card"><h3>Opening</h3><ul style="list-style:none;padding:0">
@@ -553,7 +476,101 @@
   </div>
 </div>
 
-<!-- FULL-SCREEN REVEAL OVERLAY -->
+<!-- ══ REVEAL MODAL (full-screen, captain-pw gated) ══════════════ -->
+<div class="modal-overlay" id="reveal-modal">
+  <div class="modal-box reveal-modal-box">
+    <div class="modal-header">
+      <h2>🎭 Vote Reveal</h2>
+      <button class="modal-close" onclick="closeRevealModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <!-- Password gate (skipped if captain already authed) -->
+      <div id="rv-pw-wrap" class="pw-gate" style="min-height:40vh;">
+        <img src="https://static.wixstatic.com/media/cccfa7_03d9f69f888445f082c066297b314f39~mv2.png/v1/fill/w_99,h_101,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/The%20Wimbledon%20Logo%20%2B%20Guidelines-1.png" style="width:48px;opacity:0.7">
+        <h2>Captain's Vote Reveal</h2>
+        <p>Captains only</p>
+        <input type="password" id="rv-pw-in" placeholder="••••••" onkeydown="if(event.key==='Enter')checkRevealPw()">
+        <button class="pw-btn" onclick="checkRevealPw()">Enter</button>
+        <p class="pw-error" id="rv-pw-err"></p>
+      </div>
+
+      <!-- Actual reveal content (hidden until auth) -->
+      <div id="rv-content" style="display:none;">
+        <div class="card" id="rv-picker-card">
+          <div class="form-group">
+            <label>Match to reveal</label>
+            <select id="rv-fixture-sel" onchange="onRvFixtureChange()">
+              <option value="">— Select match —</option>
+            </select>
+          </div>
+          <p id="rv-picker-hint" style="font-size:11px;color:#666;font-style:italic;margin-top:6px;"></p>
+        </div>
+
+        <div id="rv-stage" style="display:none">
+          <div class="rv-tally-wrap">
+            <div class="rv-tally">
+              <div class="rv-tally-header mom">
+                <span>🏆 MOM</span>
+                <span class="rv-tally-count" id="rv-mom-total">0 votes</span>
+              </div>
+              <div class="rv-tally-body" id="rv-mom-tally"></div>
+            </div>
+            <div class="rv-tally">
+              <div class="rv-tally-header dod">
+                <span>💩 DOD</span>
+                <span class="rv-tally-count" id="rv-dod-total">0 votes</span>
+              </div>
+              <div class="rv-tally-body" id="rv-dod-tally"></div>
+            </div>
+          </div>
+
+          <div class="rv-pile-wrap">
+            <div class="rv-pile-status" id="rv-pile-status"></div>
+            <div class="rv-pile" id="rv-pile"></div>
+            <p class="rv-pile-hint" id="rv-pile-hint">Click a ball to reveal</p>
+          </div>
+
+          <div class="rv-confirm" id="rv-confirm" style="display:none">
+            <div class="step-badge" style="background:#4caf50">ALL REVEALED — CONFIRM WINNERS</div>
+            <div class="card">
+              <div class="form-group">
+                <label>Man of the Match</label>
+                <select id="rv-mom-winner"></select>
+              </div>
+              <div class="form-group">
+                <label>Dick of the Day</label>
+                <select id="rv-dod-winner"></select>
+              </div>
+              <p style="font-size:11px;color:#666;font-style:italic;">Pre-filled with the leader. Change if there's a tie or captain's call.</p>
+            </div>
+
+            <div class="step-badge">PLAYER STATS</div>
+            <div class="card" style="padding:12px 8px;">
+              <div class="ts-squad-hint" style="padding:0 6px 8px;">Enter goals, assists and cards for players who played.</div>
+              <div class="match-stats-scroll">
+                <table class="match-stats-table">
+                  <thead><tr>
+                    <th>Player</th>
+                    <th>⚽ G</th><th>🎯 A</th>
+                    <th style="color:#4caf50">GRN</th>
+                    <th style="color:#ffc107">YLW</th>
+                    <th style="color:#f44336">RED</th>
+                  </tr></thead>
+                  <tbody id="rv-stats-rows"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="alert" id="rv-alert"></div>
+            <button class="submit-btn" onclick="finaliseReveal()" id="rv-submit-btn">🏁 Finalise Match</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- FULL-SCREEN REVEAL OVERLAY (ball unfold animation) -->
 <div class="rv-overlay" id="rv-overlay">
   <div class="rv-overlay-inner">
     <!-- Ball state (visible first) -->
