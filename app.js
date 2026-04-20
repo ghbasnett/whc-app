@@ -902,74 +902,141 @@ async function checkRevealPw(){
 }
 
 // ── Paper ball SVG builder ───────────────────────────────────
-// Generates a fresh crumpled-paper SVG with random crease positions.
-// `size` is the intended on-screen size (drives stroke weights); returns SVG string.
+// Faceted polygonal crumple: spiky outline + voronoi-ish panels, each panel
+// shaded by its angle relative to a light source (top-left). Real paper balls
+// read as "faceted mass with sharp creases" more than "smooth blob with shading".
 function buildPaperBallSVG(size){
   const big=size>=200;
-  // Unique IDs per ball (timestamps + random) so gradients don't collide
-  const uid='pb'+Date.now()+Math.floor(Math.random()*10000);
-  // Irregular blob outline — slight variations per ball
-  const jitter=()=>90+Math.random()*20;
-  const p1=jitter(),p2=jitter(),p3=jitter(),p4=jitter();
-  const blob=`M 100,${p1-90}
-    C ${150+Math.random()*10},${p1-88} ${188+Math.random()*10},${140-Math.random()*8} 188,100
-    C ${194-Math.random()*6},${145+Math.random()*8} ${158+Math.random()*6},${194-Math.random()*8} 100,${p3}
-    C ${55-Math.random()*8},${194-Math.random()*6} ${10+Math.random()*6},${158-Math.random()*10} 10,100
-    C ${8+Math.random()*6},${55+Math.random()*8} ${45-Math.random()*6},${10+Math.random()*6} 100,${p2-90}
-    Z`;
-  // Crease lines — irregular zigzags inside the blob
+  const uid='pb'+Date.now()+Math.floor(Math.random()*100000)+Math.floor(Math.random()*100000);
+  const cx=100,cy=100;  // centre of 200x200 viewbox
+  const light={x:50,y:40};  // light source (top-left)
+
+  // 1. SPIKY OUTLINE — points around a circle with random radius variation
+  const outerN=big?14:11;
+  const outerPts=[];
+  for(let i=0;i<outerN;i++){
+    const angle=(i/outerN)*Math.PI*2+(Math.random()-0.5)*0.25;
+    const r=(big?86:82)+Math.random()*(big?10:8)-(Math.random()*(big?6:4));
+    outerPts.push({x:cx+Math.cos(angle)*r,y:cy+Math.sin(angle)*r,a:angle});
+  }
+  const outlinePath='M '+outerPts.map(p=>p.x.toFixed(1)+','+p.y.toFixed(1)).join(' L ')+' Z';
+
+  // 2. INTERIOR CRUMPLE POINTS — scattered points inside the ball for panel corners
+  const interiorN=big?10:7;
+  const interior=[];
+  for(let i=0;i<interiorN;i++){
+    const angle=Math.random()*Math.PI*2;
+    const r=Math.random()*(big?60:55);
+    interior.push({x:cx+Math.cos(angle)*r,y:cy+Math.sin(angle)*r});
+  }
+  // Plus a few points halfway out for structure
+  for(let i=0;i<(big?6:5);i++){
+    const angle=(i/(big?6:5))*Math.PI*2+Math.random()*0.4;
+    const r=(big?50:45)+Math.random()*15;
+    interior.push({x:cx+Math.cos(angle)*r,y:cy+Math.sin(angle)*r});
+  }
+
+  // 3. BUILD FACETED PANELS via fan-triangulation from interior points to outer edge
+  // We'll triangulate: pair each outer edge with its nearest interior point, forming triangles.
+  // Simple and cheap — gives paper-panel look without full Delaunay.
+  const panels=[];
+  for(let i=0;i<outerPts.length;i++){
+    const p1=outerPts[i];
+    const p2=outerPts[(i+1)%outerPts.length];
+    // Find closest interior point to edge midpoint
+    const mx=(p1.x+p2.x)/2,my=(p1.y+p2.y)/2;
+    let best=interior[0],bestD=Infinity;
+    for(const ip of interior){
+      const d=(ip.x-mx)*(ip.x-mx)+(ip.y-my)*(ip.y-my);
+      if(d<bestD){bestD=d;best=ip;}
+    }
+    panels.push([p1,p2,best]);
+  }
+  // Also build panels between adjacent interior points
+  for(let i=0;i<interior.length;i++){
+    for(let j=i+1;j<interior.length;j++){
+      const a=interior[i],b=interior[j];
+      const d=Math.hypot(a.x-b.x,a.y-b.y);
+      if(d>(big?50:45))continue;  // too far — skip
+      // Find a 3rd point that isn't too far from both
+      let best=null,bestD=Infinity;
+      for(let k=0;k<interior.length;k++){
+        if(k===i||k===j)continue;
+        const c=interior[k];
+        const dd=Math.hypot(c.x-a.x,c.y-a.y)+Math.hypot(c.x-b.x,c.y-b.y);
+        if(dd<bestD){bestD=dd;best=c;}
+      }
+      if(best&&bestD<(big?100:90))panels.push([a,b,best]);
+    }
+  }
+
+  // 4. SHADE EACH PANEL by its centroid's position relative to light
+  // Closer to light = brighter, further = darker. Plus random jitter for crumple randomness.
+  const paperBase=[245,235,210];  // warm cream RGB
+  const panelSvg=[];
+  for(const pan of panels){
+    const c={x:(pan[0].x+pan[1].x+pan[2].x)/3,y:(pan[0].y+pan[1].y+pan[2].y)/3};
+    const distToLight=Math.hypot(c.x-light.x,c.y-light.y);
+    // Normalize: distance 0 = brightest, distance 200 = darkest
+    const t=Math.min(1,distToLight/160);
+    // Mix from white-ish to shadow colour — more aggressive contrast
+    const brightness=1.05-t*0.75+(Math.random()-0.5)*0.2;  // bigger range, more jitter
+    const r=Math.max(45,Math.min(255,Math.round(paperBase[0]*brightness)));
+    const g=Math.max(40,Math.min(250,Math.round(paperBase[1]*brightness)));
+    const b=Math.max(30,Math.min(235,Math.round(paperBase[2]*brightness)));
+    const pts=pan.map(p=>p.x.toFixed(1)+','+p.y.toFixed(1)).join(' ');
+    panelSvg.push(`<polygon points="${pts}" fill="rgb(${r},${g},${b})" stroke="rgba(70,45,15,0.5)" stroke-width="${big?0.55:0.4}" stroke-linejoin="bevel"/>`);
+  }
+
+  // 5. CREASE LINES — sharp ridges between panels (independent, darker lines)
   const creases=[];
-  for(let i=0;i<(big?7:5);i++){
-    const x1=30+Math.random()*140,y1=30+Math.random()*140;
-    const x2=x1+(-30+Math.random()*60),y2=y1+(-30+Math.random()*60);
-    const mx=(x1+x2)/2+(-15+Math.random()*30);
-    const my=(y1+y2)/2+(-15+Math.random()*30);
-    const opacity=0.08+Math.random()*0.14;
-    creases.push(`<path d="M ${x1.toFixed(1)},${y1.toFixed(1)} Q ${mx.toFixed(1)},${my.toFixed(1)} ${x2.toFixed(1)},${y2.toFixed(1)}" stroke="rgba(60,40,10,${opacity.toFixed(2)})" stroke-width="${big?1.2:0.9}" fill="none" stroke-linecap="round"/>`);
+  const creaseCount=big?9:7;
+  for(let i=0;i<creaseCount;i++){
+    // Random interior point to another random interior point
+    const a=interior[Math.floor(Math.random()*interior.length)];
+    const b=interior[Math.floor(Math.random()*interior.length)];
+    if(a===b)continue;
+    const opacity=0.25+Math.random()*0.3;
+    creases.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="rgba(70,45,15,${opacity.toFixed(2)})" stroke-width="${big?0.9:0.7}" stroke-linecap="round"/>`);
   }
-  // Small shadow splotches (crumpled dents)
-  const dents=[];
-  for(let i=0;i<(big?6:4);i++){
-    const cx=40+Math.random()*120,cy=40+Math.random()*120;
-    const rx=8+Math.random()*14,ry=5+Math.random()*10;
-    const rot=Math.floor(Math.random()*180);
-    dents.push(`<ellipse cx="${cx.toFixed(0)}" cy="${cy.toFixed(0)}" rx="${rx.toFixed(0)}" ry="${ry.toFixed(0)}" fill="url(#${uid}-dent)" opacity="${(0.3+Math.random()*0.3).toFixed(2)}" transform="rotate(${rot} ${cx.toFixed(0)} ${cy.toFixed(0)})"/>`);
+  // Plus highlight ridges (white) on the lit side
+  const ridges=[];
+  const ridgeCount=big?5:4;
+  for(let i=0;i<ridgeCount;i++){
+    const a=interior[Math.floor(Math.random()*interior.length)];
+    const b=interior[Math.floor(Math.random()*interior.length)];
+    if(a===b)continue;
+    // Only draw if midpoint is on the lit side
+    const mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
+    if(Math.hypot(mx-light.x,my-light.y)>90)continue;
+    ridges.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="rgba(255,253,240,0.55)" stroke-width="${big?0.7:0.5}" stroke-linecap="round"/>`);
   }
-  // Highlights (paper catches light)
-  const highlights=[];
-  for(let i=0;i<(big?4:3);i++){
-    const cx=30+Math.random()*140,cy=30+Math.random()*140;
-    const rx=6+Math.random()*10,ry=3+Math.random()*6;
-    const rot=Math.floor(Math.random()*180);
-    highlights.push(`<ellipse cx="${cx.toFixed(0)}" cy="${cy.toFixed(0)}" rx="${rx.toFixed(0)}" ry="${ry.toFixed(0)}" fill="url(#${uid}-hl)" opacity="${(0.35+Math.random()*0.3).toFixed(2)}" transform="rotate(${rot} ${cx.toFixed(0)} ${cy.toFixed(0)})"/>`);
-  }
+
   return `<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
     <defs>
-      <radialGradient id="${uid}-paper" cx="35%" cy="30%" r="75%">
-        <stop offset="0%" stop-color="#fffdf5"/>
-        <stop offset="35%" stop-color="#f6f0dc"/>
-        <stop offset="70%" stop-color="#d9cfb3"/>
-        <stop offset="100%" stop-color="#a39678"/>
+      <radialGradient id="${uid}-core" cx="30%" cy="28%" r="80%">
+        <stop offset="0%" stop-color="rgba(255,252,235,0.4)"/>
+        <stop offset="100%" stop-color="rgba(255,252,235,0)"/>
       </radialGradient>
-      <radialGradient id="${uid}-dent" cx="50%" cy="50%" r="50%">
-        <stop offset="0%" stop-color="rgba(60,40,10,0.35)"/>
-        <stop offset="100%" stop-color="rgba(60,40,10,0)"/>
+      <radialGradient id="${uid}-shadow" cx="70%" cy="75%" r="70%">
+        <stop offset="0%" stop-color="rgba(40,25,10,0)"/>
+        <stop offset="100%" stop-color="rgba(40,25,10,0.35)"/>
       </radialGradient>
-      <radialGradient id="${uid}-hl" cx="50%" cy="50%" r="50%">
-        <stop offset="0%" stop-color="rgba(255,253,240,0.9)"/>
-        <stop offset="100%" stop-color="rgba(255,253,240,0)"/>
-      </radialGradient>
-      <filter id="${uid}-rough" x="-10%" y="-10%" width="120%" height="120%">
-        <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="${Math.floor(Math.random()*100)}"/>
-        <feDisplacementMap in="SourceGraphic" scale="${big?2.5:1.5}"/>
-      </filter>
     </defs>
-    <g filter="url(#${uid}-rough)">
-      <path d="${blob}" fill="url(#${uid}-paper)" stroke="rgba(110,85,45,0.4)" stroke-width="${big?1.2:0.8}"/>
-      ${dents.join('')}
-      ${highlights.join('')}
-      ${creases.join('')}
-    </g>
+    <!-- base blob fill as fallback (ensures no gaps visible) -->
+    <path d="${outlinePath}" fill="rgb(230,220,195)"/>
+    <!-- faceted panels -->
+    ${panelSvg.join('')}
+    <!-- creases (dark) -->
+    ${creases.join('')}
+    <!-- ridges (light) -->
+    ${ridges.join('')}
+    <!-- overall light wash -->
+    <path d="${outlinePath}" fill="url(#${uid}-core)"/>
+    <!-- overall shadow wash -->
+    <path d="${outlinePath}" fill="url(#${uid}-shadow)"/>
+    <!-- crisp outline -->
+    <path d="${outlinePath}" fill="none" stroke="rgba(70,45,20,0.5)" stroke-width="${big?1.0:0.8}" stroke-linejoin="round"/>
   </svg>`;
 }
 
