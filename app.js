@@ -864,6 +864,8 @@ function rollDice(){
 function openRevealFromVote(){
   const modal=document.getElementById('reveal-modal');
   modal.classList.add('open');
+  // Ensure the modal scroll starts at the top (not wherever the page was)
+  modal.scrollTop=0;
   // If captain already authed in this session, skip password
   if(captainAuthed){
     document.getElementById('rv-pw-wrap').style.display='none';
