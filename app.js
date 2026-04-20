@@ -60,7 +60,6 @@ function showMtab(id,btn){
   if(id==='m-wheel')setTimeout(initWheel,50);
   if(id==='m-predictions')loadPredictions();
   if(id==='m-ind-fines')renderIndFines();
-  if(id==='m-reveal')loadRevealFixtures();
 }
 
 // ── CAPTAIN'S PORTAL ─────────────────────────────────────────
@@ -235,6 +234,7 @@ async function loadOpenVoteSession(){
   document.getElementById('vote-none').style.display='none';
   document.getElementById('vote-form').style.display='none';
   document.getElementById('vote-done').style.display='none';
+  document.getElementById('reveal-btn').style.display='none';
 
   const{data,error}=await sb.from('match_vote_sessions')
     .select('id,fixture_id,eligible_players,whc_goals,opp_goals,status,fixtures!inner(opponent,match_date,season)')
@@ -257,6 +257,8 @@ async function loadOpenVoteSession(){
   }
 
   currentVoteSession=data[0];
+  // Show Reveal button only when there's an open session
+  document.getElementById('reveal-btn').style.display='inline-block';
   renderVoteForm();
 }
 
@@ -858,6 +860,120 @@ function rollDice(){
 // REVEAL — MOM/DOD paper ball theatre
 // ══════════════════════════════════════════════════════════
 
+// ── Modal open/close + password gate ─────────────────────────
+function openRevealFromVote(){
+  const modal=document.getElementById('reveal-modal');
+  modal.classList.add('open');
+  // If captain already authed in this session, skip password
+  if(captainAuthed){
+    document.getElementById('rv-pw-wrap').style.display='none';
+    document.getElementById('rv-content').style.display='block';
+    loadRevealFixtures();
+  } else {
+    document.getElementById('rv-pw-wrap').style.display='flex';
+    document.getElementById('rv-content').style.display='none';
+    setTimeout(()=>document.getElementById('rv-pw-in').focus(),100);
+  }
+}
+function closeRevealModal(){
+  document.getElementById('reveal-modal').classList.remove('open');
+  // Also close the full-screen ball overlay if it was open
+  const ov=document.getElementById('rv-overlay');
+  if(ov.classList.contains('open'))ov.classList.remove('open');
+  rvRevealing=false;
+}
+document.getElementById('reveal-modal').addEventListener('click',function(e){
+  if(e.target===this)closeRevealModal();
+});
+
+async function checkRevealPw(){
+  const input=document.getElementById('rv-pw-in').value;
+  if(!input)return;
+  if(!captainPwHash){document.getElementById('rv-pw-err').textContent='Could not load — try again.';return;}
+  const hashed=await hashString(input);
+  if(hashed===captainPwHash){
+    captainAuthed=true;
+    document.getElementById('rv-pw-wrap').style.display='none';
+    document.getElementById('rv-content').style.display='block';
+    loadRevealFixtures();
+  } else {
+    document.getElementById('rv-pw-err').textContent='Incorrect password.';
+  }
+}
+
+// ── Paper ball SVG builder ───────────────────────────────────
+// Generates a fresh crumpled-paper SVG with random crease positions.
+// `size` is the intended on-screen size (drives stroke weights); returns SVG string.
+function buildPaperBallSVG(size){
+  const big=size>=200;
+  // Unique IDs per ball (timestamps + random) so gradients don't collide
+  const uid='pb'+Date.now()+Math.floor(Math.random()*10000);
+  // Irregular blob outline — slight variations per ball
+  const jitter=()=>90+Math.random()*20;
+  const p1=jitter(),p2=jitter(),p3=jitter(),p4=jitter();
+  const blob=`M 100,${p1-90}
+    C ${150+Math.random()*10},${p1-88} ${188+Math.random()*10},${140-Math.random()*8} 188,100
+    C ${194-Math.random()*6},${145+Math.random()*8} ${158+Math.random()*6},${194-Math.random()*8} 100,${p3}
+    C ${55-Math.random()*8},${194-Math.random()*6} ${10+Math.random()*6},${158-Math.random()*10} 10,100
+    C ${8+Math.random()*6},${55+Math.random()*8} ${45-Math.random()*6},${10+Math.random()*6} 100,${p2-90}
+    Z`;
+  // Crease lines — irregular zigzags inside the blob
+  const creases=[];
+  for(let i=0;i<(big?7:5);i++){
+    const x1=30+Math.random()*140,y1=30+Math.random()*140;
+    const x2=x1+(-30+Math.random()*60),y2=y1+(-30+Math.random()*60);
+    const mx=(x1+x2)/2+(-15+Math.random()*30);
+    const my=(y1+y2)/2+(-15+Math.random()*30);
+    const opacity=0.08+Math.random()*0.14;
+    creases.push(`<path d="M ${x1.toFixed(1)},${y1.toFixed(1)} Q ${mx.toFixed(1)},${my.toFixed(1)} ${x2.toFixed(1)},${y2.toFixed(1)}" stroke="rgba(60,40,10,${opacity.toFixed(2)})" stroke-width="${big?1.2:0.9}" fill="none" stroke-linecap="round"/>`);
+  }
+  // Small shadow splotches (crumpled dents)
+  const dents=[];
+  for(let i=0;i<(big?6:4);i++){
+    const cx=40+Math.random()*120,cy=40+Math.random()*120;
+    const rx=8+Math.random()*14,ry=5+Math.random()*10;
+    const rot=Math.floor(Math.random()*180);
+    dents.push(`<ellipse cx="${cx.toFixed(0)}" cy="${cy.toFixed(0)}" rx="${rx.toFixed(0)}" ry="${ry.toFixed(0)}" fill="url(#${uid}-dent)" opacity="${(0.3+Math.random()*0.3).toFixed(2)}" transform="rotate(${rot} ${cx.toFixed(0)} ${cy.toFixed(0)})"/>`);
+  }
+  // Highlights (paper catches light)
+  const highlights=[];
+  for(let i=0;i<(big?4:3);i++){
+    const cx=30+Math.random()*140,cy=30+Math.random()*140;
+    const rx=6+Math.random()*10,ry=3+Math.random()*6;
+    const rot=Math.floor(Math.random()*180);
+    highlights.push(`<ellipse cx="${cx.toFixed(0)}" cy="${cy.toFixed(0)}" rx="${rx.toFixed(0)}" ry="${ry.toFixed(0)}" fill="url(#${uid}-hl)" opacity="${(0.35+Math.random()*0.3).toFixed(2)}" transform="rotate(${rot} ${cx.toFixed(0)} ${cy.toFixed(0)})"/>`);
+  }
+  return `<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <radialGradient id="${uid}-paper" cx="35%" cy="30%" r="75%">
+        <stop offset="0%" stop-color="#fffdf5"/>
+        <stop offset="35%" stop-color="#f6f0dc"/>
+        <stop offset="70%" stop-color="#d9cfb3"/>
+        <stop offset="100%" stop-color="#a39678"/>
+      </radialGradient>
+      <radialGradient id="${uid}-dent" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="rgba(60,40,10,0.35)"/>
+        <stop offset="100%" stop-color="rgba(60,40,10,0)"/>
+      </radialGradient>
+      <radialGradient id="${uid}-hl" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="rgba(255,253,240,0.9)"/>
+        <stop offset="100%" stop-color="rgba(255,253,240,0)"/>
+      </radialGradient>
+      <filter id="${uid}-rough" x="-10%" y="-10%" width="120%" height="120%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="${Math.floor(Math.random()*100)}"/>
+        <feDisplacementMap in="SourceGraphic" scale="${big?2.5:1.5}"/>
+      </filter>
+    </defs>
+    <g filter="url(#${uid}-rough)">
+      <path d="${blob}" fill="url(#${uid}-paper)" stroke="rgba(110,85,45,0.4)" stroke-width="${big?1.2:0.8}"/>
+      ${dents.join('')}
+      ${highlights.join('')}
+      ${creases.join('')}
+    </g>
+  </svg>`;
+}
+
+// ── Data loaders ─────────────────────────────────────────────
 async function loadRevealFixtures(){
   const sel=document.getElementById('rv-fixture-sel');
   sel.innerHTML='<option value="">— Select match —</option>';
@@ -952,7 +1068,7 @@ function renderRevealPile(){
     const ball=document.createElement('div');
     ball.className='rv-ball';
     ball.style.animationDelay=(Math.random()*0.3).toFixed(2)+'s';
-    ball.innerHTML='<div class="rv-ball-shape"></div>';
+    ball.innerHTML=buildPaperBallSVG(52);
     ball.addEventListener('click',()=>revealOneVote(v.id,ball));
     pile.appendChild(ball);
   });
@@ -999,13 +1115,16 @@ async function revealOneVote(voteId,ballEl){
   rvDodTally[vote.dod_vote]=(rvDodTally[vote.dod_vote]||0)+1;
 
   // Ball fades from pile
-  ballEl.querySelector('.rv-ball-shape').classList.add('discarded');
+  ballEl.classList.add('discarded');
 
   // Open full-screen overlay
   const overlay=document.getElementById('rv-overlay');
   const bigBall=document.getElementById('rv-ball-big');
   const paper=document.getElementById('rv-paper');
   const doneBtn=document.getElementById('rv-done-btn');
+
+  // Inject a freshly-generated big paper ball SVG
+  bigBall.innerHTML=buildPaperBallSVG(280);
 
   // Populate paper content
   document.getElementById('rv-paper-mom-name').textContent=vote.mom_vote;
