@@ -6,17 +6,44 @@ const IND_FINES={'Colesy':['Double baby tax','Values babies over hockey #epstein
 
 const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 let currentSeason='2025-26',statsData=[],currentSort='ppg';
+let completedFixturesCount=0;   // total completed fixtures this season
+let minAppsThreshold=0;          // derived: ceil(0.2 * completedFixturesCount), only enforced when completedFixturesCount>=10
+let thresholdActive=false;       // true only when >=10 completed fixtures
 let wheelReady=false,spinning=false,wheelAngle=0,audioCtx=null,spinNodes=[];
 let meetingPwHash=null,captainPwHash=null,captainAuthed=false;
 let tsSquad=[];
-let vsSquad=[];            // captain vote setup: squad with selected state
-let currentVoteSession=null; // currently open session on the public vote page
+let vsSquad=[];
+let currentVoteSession=null;
 // REVEAL state
-let rvSession=null;        // currently loaded session for reveal
-let rvVotes=[];            // all votes for this session (full list with revealed flags)
-let rvRevealing=false;     // lock while animation in progress
-let rvMomTally={};         // {playerName:count}
+let rvSession=null;
+let rvVotes=[];
+let rvRevealing=false;
+let rvMomTally={};
 let rvDodTally={};
+
+// Map sort column → header cell index (0-based within thead row)
+// Columns: # | Player | Apps | Pts | G | A | G+A | MOM🏆 | DOD🏆 | PPG
+const SORT_COL_TO_IDX={
+  appearances:2,
+  total_points:3,
+  goals:4,
+  assists:5,
+  goals_plus_assists:6,
+  mom_wins:7,
+  dod_wins:8,
+  ppg:9
+};
+// Friendly label for each sort column, used in hero card
+const SORT_LABELS={
+  ppg:{label:'Points Per Game',unit:'PPG'},
+  goals:{label:'Top Scorer',unit:'GOALS'},
+  assists:{label:'Top Assists',unit:'ASSISTS'},
+  appearances:{label:'Most Appearances',unit:'APPS'},
+  total_points:{label:'Total Points',unit:'PTS'},
+  goals_plus_assists:{label:'Goals + Assists',unit:'G+A'},
+  mom_wins:{label:'MOM Wins',unit:'MOM'},
+  dod_wins:{label:'DOD Wins',unit:'DOD'}
+};
 
 // ── PLAYER LOADER ────────────────────────────────────────────
 async function loadPlayersFromDB(){
@@ -94,7 +121,6 @@ async function checkCaptainPw(){
   }
 }
 
-// Switch between Teamsheet / Start Vote / Quick Entry tabs
 function showCpTab(id,btn){
   document.querySelectorAll('.cp-tab-content').forEach(s=>s.classList.remove('active'));
   document.querySelectorAll('.cp-tab').forEach(b=>b.classList.remove('active'));
@@ -106,7 +132,6 @@ function showCpTab(id,btn){
 
 // ── CAPTAIN VOTE SETUP ───────────────────────────────────────
 async function loadVsData(){
-  // Populate fixture dropdown (open fixtures = no result set)
   const{data:fixtures}=await sb.from('fixtures')
     .select('id,match_date,opponent,result,whc_goals,opp_goals')
     .eq('season',currentSeason)
@@ -121,12 +146,10 @@ async function loadVsData(){
     sel.appendChild(o);
   });
 
-  // Load squad from DB for "who played" ticklist
   const{data:players}=await sb.from('players').select('name').eq('active',true).order('sort_order',{ascending:true});
   vsSquad=(players||[]).map(p=>({name:p.name,selected:false}));
   renderVsSquad();
 
-  // Load any existing open sessions so captain sees them
   refreshVsExistingSessions();
 }
 
@@ -160,8 +183,7 @@ async function refreshVsExistingSessions(){
   const wrap=document.getElementById('vs-existing-wrap');
   const card=document.getElementById('vs-existing-card');
   if(!sessions||!sessions.length){wrap.style.display='none';return;}
-  const s=sessions[0];  // most recent only (we only allow one open at a time practically)
-  // Count votes cast
+  const s=sessions[0];
   const{count}=await sb.from('match_votes').select('*',{count:'exact',head:true}).eq('session_id',s.id);
   const d=new Date(s.fixtures.match_date+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'});
   card.innerHTML=`
@@ -176,11 +198,8 @@ async function refreshVsExistingSessions(){
 }
 
 function onVsFixtureChange(){
-  // Prefill score from fixture if already entered
   const sel=document.getElementById('vs-fixture');
   if(!sel.value)return;
-  const opt=sel.options[sel.selectedIndex];
-  // We didn't store score on the option; re-fetch it from DB cheaply
   sb.from('fixtures').select('whc_goals,opp_goals').eq('id',sel.value).single().then(({data})=>{
     if(data){
       if(data.whc_goals!=null)document.getElementById('vs-gf').value=data.whc_goals;
@@ -199,7 +218,6 @@ async function openVoteSession(){
   if(!eligible.length){showAlert(al,'error','Tick at least one player as having played.');return;}
   const btn=document.getElementById('vs-open-btn');btn.disabled=true;btn.textContent='Opening...';
   try{
-    // Upsert so running this twice on same fixture doesn't error (overwrites eligible list + score)
     const{error}=await sb.from('match_vote_sessions').upsert({
       fixture_id:parseInt(fixId),
       status:'open',
@@ -221,7 +239,6 @@ async function openVoteSession(){
 async function cancelVoteSession(sessionId){
   if(!confirm('Cancel this voting session? All submitted votes will be deleted. This cannot be undone.'))return;
   try{
-    // Delete session (cascade deletes votes)
     await sb.from('match_vote_sessions').delete().eq('id',sessionId);
     refreshVsExistingSessions();
     showAlert(document.getElementById('vs-alert'),'success','Voting session cancelled.');
@@ -257,7 +274,6 @@ async function loadOpenVoteSession(){
   }
 
   currentVoteSession=data[0];
-  // Show Reveal button only when there's an open session
   document.getElementById('reveal-btn').style.display='inline-block';
   renderVoteForm();
 }
@@ -277,17 +293,13 @@ function renderVoteForm(){
       <div class="vf-sub">${resultLabel} · ${s.eligible_players.length} players eligible</div>
     </div>`;
 
-  // Populate MOM and DOD dropdowns
-  // Order: eligible players first (as captain ticked), then any remaining full-squad players
   const eligible=new Set(s.eligible_players);
   const rest=PLAYERS.filter(p=>!eligible.has(p));
-  const orderedList=[...s.eligible_players,...rest];
 
   ['vote-mom','vote-dod'].forEach(id=>{
     const sel=document.getElementById(id);
     const placeholder=id==='vote-mom'?'— Pick your MOM —':'— Pick your DOD —';
     sel.innerHTML=`<option value="">${placeholder}</option>`;
-    // Group label: played
     if(s.eligible_players.length){
       const og=document.createElement('optgroup');og.label='Played this match';
       s.eligible_players.forEach(p=>{const o=document.createElement('option');o.value=o.textContent=p;og.appendChild(o);});
@@ -300,7 +312,6 @@ function renderVoteForm(){
     }
   });
 
-  // Clear any previous form state
   document.getElementById('vote-mom').value='';
   document.getElementById('vote-dod').value='';
   document.getElementById('vote-mom-reason').value='';
@@ -518,39 +529,259 @@ async function loadFixtureDropdown(){
 }
 function onFixtureSelect(){updateGoalsTally();}
 
-// ── STATS ─────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════
+// STATS — rebuilt
+// ══════════════════════════════════════════════════════════
+
 async function loadStats(){
   document.getElementById('stats-loading').style.display='block';
   document.getElementById('stats-wrap').style.display='none';
+  // Also clear any hero/threshold elements from a previous render
+  removeStatsExtras();
+
   try{
-    const{data,error}=await sb.from('player_stats_view').select('*').eq('season',currentSeason);
-    if(error)throw error;
-    statsData=data||[];renderStats(currentSort);
-  }catch(e){document.getElementById('stats-loading').innerHTML=`<p style="color:#f44336">Failed.</p>`;}
+    // Fetch in parallel: stats view + completed fixture count
+    const [statsRes,fixtureRes]=await Promise.all([
+      sb.from('player_stats_view').select('*').eq('season',currentSeason),
+      sb.from('fixtures').select('id',{count:'exact',head:true}).eq('season',currentSeason).not('result','is',null)
+    ]);
+    if(statsRes.error)throw statsRes.error;
+
+    statsData=statsRes.data||[];
+    completedFixturesCount=fixtureRes.count||0;
+    thresholdActive=completedFixturesCount>=10;
+    minAppsThreshold=thresholdActive?Math.ceil(completedFixturesCount*0.2):0;
+
+    renderStats(currentSort);
+  }catch(e){
+    console.error('Stats load failed:',e);
+    document.getElementById('stats-loading').innerHTML=`<p style="color:#f44336">Failed.</p>`;
+  }
 }
-function sortStats(col,btn){currentSort=col;if(btn){document.querySelectorAll('.sort-tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}renderStats(col);}
+
+function removeStatsExtras(){
+  const hero=document.getElementById('stats-leader-hero');if(hero)hero.remove();
+  const pill=document.getElementById('stats-threshold-pill');if(pill)pill.remove();
+}
+
+function sortStats(col,btn){
+  currentSort=col;
+  // Sync tab UI if a tab matches this column
+  const tabMap={ppg:0,goals:1,assists:2,appearances:3};
+  if(tabMap.hasOwnProperty(col)){
+    const tabs=document.querySelectorAll('.sort-tab');
+    tabs.forEach((b,i)=>b.classList.toggle('active',i===tabMap[col]));
+  } else {
+    // Column sort with no matching tab — clear tab active state
+    document.querySelectorAll('.sort-tab').forEach(b=>b.classList.remove('active'));
+  }
+  renderStats(col);
+}
+
+// Get sort value for a player row on a given column.
+// Handles synthetic goals_plus_assists.
+function getSortValue(row,col){
+  if(col==='goals_plus_assists')return (parseInt(row.goals)||0)+(parseInt(row.assists)||0);
+  return parseFloat(row[col])||0;
+}
+
+function getInitials(name){
+  const parts=name.trim().split(/\s+/);
+  if(parts.length===1)return parts[0].substring(0,2).toUpperCase();
+  return (parts[0][0]+parts[parts.length-1][0]).toUpperCase();
+}
+
+function renderLeaderHero(leader,col){
+  const existing=document.getElementById('stats-leader-hero');if(existing)existing.remove();
+  if(!leader)return;
+  const info=SORT_LABELS[col]||{label:'Leader',unit:''};
+  const val=getSortValue(leader,col);
+  const displayVal=col==='ppg'?val.toFixed(2):Math.round(val);
+  const hero=document.createElement('div');
+  hero.className='leader-hero';
+  hero.id='stats-leader-hero';
+  hero.innerHTML=`
+    <div class="lh-avatar">${getInitials(leader.player_name)}</div>
+    <div class="lh-body">
+      <div class="lh-label"><span class="lh-crown">👑</span> ${info.label}</div>
+      <div class="lh-name">${leader.player_name}</div>
+      <div class="lh-sub">${leader.appearances||0} app${(leader.appearances||0)!==1?'s':''} · ${leader.goals||0}G ${leader.assists||0}A</div>
+    </div>
+    <div class="lh-stat">
+      <div class="lh-stat-val">${displayVal}</div>
+      <div class="lh-stat-label">${info.unit}</div>
+    </div>`;
+  // Insert just before the sort-tabs bar
+  const tabsBar=document.querySelector('#sec-stats .sort-tabs');
+  tabsBar.parentNode.insertBefore(hero,tabsBar);
+}
+
+function renderThresholdPill(){
+  const existing=document.getElementById('stats-threshold-pill');if(existing)existing.remove();
+  if(!thresholdActive)return;
+  const pill=document.createElement('div');
+  pill.className='threshold-pill';
+  pill.id='stats-threshold-pill';
+  pill.innerHTML=`ℹ Min apps threshold: <strong style="margin-left:3px">${minAppsThreshold}</strong><span style="margin-left:4px;color:#666">(20% of ${completedFixturesCount} played)</span>`;
+  // Insert just before the stats-wrap
+  const wrap=document.getElementById('stats-wrap');
+  wrap.parentNode.insertBefore(pill,wrap);
+}
+
 function renderStats(col){
   document.getElementById('stats-loading').style.display='none';
   document.getElementById('stats-wrap').style.display='block';
-  const sorted=[...statsData].sort((a,b)=>(parseFloat(b[col])||0)-(parseFloat(a[col])||0));
-  const topG=sorted.length?Math.max(...sorted.map(r=>parseInt(r.goals)||0)):0;
-  const topA=sorted.length?Math.max(...sorted.map(r=>parseInt(r.assists)||0)):0;
-  const tbody=document.getElementById('stats-tbody');tbody.innerHTML='';
-  if(!sorted.length){tbody.innerHTML='<tr><td colspan="10" class="empty">No stats yet.</td></tr>';return;}
-  sorted.forEach((r,i)=>{
-    const g=parseInt(r.goals)||0,a=parseInt(r.assists)||0,ppg=parseFloat(r.ppg||0);
-    const isTopG=g>0&&g===topG,isTopA=a>0&&a===topA;
-    const rNum=i<3?`<span class="rank rank-${i+1}">${i+1}</span>`:`<span style="color:#444;font-size:11px">${i+1}</span>`;
-    const badges=(isTopG?`<span class="badge-stat badge-g">⚽TOP</span>`:'')+(isTopA?`<span class="badge-stat badge-a">🎯TOP</span>`:'');
-    const tr=document.createElement('tr');
-    if(isTopG&&col==='goals')tr.classList.add('top-goals');
-    if(isTopA&&col==='assists')tr.classList.add('top-assists');
-    tr.innerHTML=`<td>${rNum}</td><td>${r.player_name}${badges}</td><td>${r.appearances||0}</td><td>${r.total_points||0}</td><td>${g}</td><td>${a}</td><td>${g+a}</td><td>${r.mom_wins||0}</td><td>${r.dod_wins||0}</td><td class="ppg-val">${ppg.toFixed(2)}</td>`;
-    tbody.appendChild(tr);
+
+  // Partition into qualified / unqualified
+  const qualified=[];
+  const unqualified=[];
+  statsData.forEach(r=>{
+    const apps=parseInt(r.appearances)||0;
+    if(thresholdActive && apps<minAppsThreshold){
+      unqualified.push(r);
+    } else {
+      qualified.push(r);
+    }
   });
+
+  // Sort each group by the active column
+  const sortFn=(a,b)=>getSortValue(b,col)-getSortValue(a,col);
+  qualified.sort(sortFn);
+  unqualified.sort(sortFn);
+
+  // Compute top values *only among qualified* so unqualified players don't accidentally take the badge
+  const topG=qualified.length?Math.max(...qualified.map(r=>parseInt(r.goals)||0)):0;
+  const topA=qualified.length?Math.max(...qualified.map(r=>parseInt(r.assists)||0)):0;
+  // Max value in the active sort column across qualified (for inline bars)
+  const topSortVal=qualified.length?Math.max(...qualified.map(r=>getSortValue(r,col)),0):0;
+
+  // Leader hero + threshold pill
+  renderThresholdPill();
+  renderLeaderHero(qualified[0],col);
+
+  // Sync column-active header class
+  document.querySelectorAll('.stats-table th').forEach((th,idx)=>{
+    th.classList.toggle('sort-active',idx===SORT_COL_TO_IDX[col]);
+  });
+
+  const tbody=document.getElementById('stats-tbody');tbody.innerHTML='';
+
+  if(!qualified.length && !unqualified.length){
+    tbody.innerHTML='<tr><td colspan="10" class="empty">No stats yet.</td></tr>';
+    return;
+  }
+
+  // Helper to render a single row
+  function renderRow(r,rank,isUnqualified){
+    const g=parseInt(r.goals)||0,a=parseInt(r.assists)||0,ppg=parseFloat(r.ppg||0);
+    const apps=parseInt(r.appearances)||0;
+    const totalPts=parseInt(r.total_points)||0;
+    const momWins=parseInt(r.mom_wins)||0;
+    const dodWins=parseInt(r.dod_wins)||0;
+    const gPlusA=g+a;
+    // Top badges only for qualified
+    const isTopG=!isUnqualified&&g>0&&g===topG;
+    const isTopA=!isUnqualified&&a>0&&a===topA;
+
+    // Rank pill: only qualified get podium colours, unqualified get no circle
+    let rNum;
+    if(isUnqualified){
+      rNum=`<span class="rank-n">—</span>`;
+    } else if(rank===1){
+      rNum=`<span class="rank rank-1">1</span>`;
+    } else if(rank===2){
+      rNum=`<span class="rank rank-2">2</span>`;
+    } else if(rank===3){
+      rNum=`<span class="rank rank-3">3</span>`;
+    } else {
+      rNum=`<span class="rank-n">${rank}</span>`;
+    }
+
+    const badges=(isTopG?`<span class="badge-stat badge-g">⚽TOP</span>`:'')+(isTopA?`<span class="badge-stat badge-a">🎯TOP</span>`:'');
+    const unqTag=isUnqualified?`<span class="unq-tag">${apps}/${minAppsThreshold} apps</span>`:'';
+
+    const tr=document.createElement('tr');
+    if(isUnqualified){
+      tr.classList.add('unqualified');
+    } else {
+      if(isTopG&&col==='goals')tr.classList.add('top-goals');
+      if(isTopA&&col==='assists')tr.classList.add('top-assists');
+    }
+
+    // Build each cell, attaching a bar-wrap to whichever is the active sort column
+    const cells=[
+      {html:rNum,idx:1},
+      {html:`${r.player_name}${badges}${unqTag}`,idx:2},
+      {html:apps,idx:3,sortCol:'appearances'},
+      {html:totalPts,idx:4,sortCol:'total_points'},
+      {html:g,idx:5,sortCol:'goals'},
+      {html:a,idx:6,sortCol:'assists'},
+      {html:gPlusA,idx:7,sortCol:'goals_plus_assists'},
+      {html:momWins,idx:8,sortCol:'mom_wins'},
+      {html:dodWins,idx:9,sortCol:'dod_wins'},
+      {html:`<span class="ppg-val">${ppg.toFixed(2)}</span>`,idx:10,sortCol:'ppg'}
+    ];
+
+    cells.forEach(c=>{
+      const td=document.createElement('td');
+      td.innerHTML=c.html;
+      if(c.sortCol===col){
+        td.classList.add('sort-active');
+        // Inline bar (only qualified rows & positive value)
+        if(!isUnqualified && topSortVal>0){
+          const thisVal=getSortValue(r,col);
+          const pct=Math.max(0,Math.min(100,(thisVal/topSortVal)*100));
+          const bar=document.createElement('span');
+          bar.className='bar-wrap';
+          bar.innerHTML=`<span class="bar-fill" style="width:${pct}%"></span>`;
+          td.appendChild(bar);
+        }
+      }
+      tr.appendChild(td);
+    });
+
+    return tr;
+  }
+
+  // Render qualified
+  qualified.forEach((r,i)=>tbody.appendChild(renderRow(r,i+1,false)));
+
+  // Divider (only show if both groups have rows)
+  if(qualified.length && unqualified.length){
+    const divRow=document.createElement('tr');
+    divRow.className='divider-row';
+    divRow.innerHTML=`<td colspan="10"><span class="divider-text">Below minimum apps threshold (${minAppsThreshold} apps required)</span></td>`;
+    tbody.appendChild(divRow);
+  }
+
+  // Render unqualified
+  unqualified.forEach(r=>tbody.appendChild(renderRow(r,null,true)));
+
+  // Hook up clickable column headers (once — but safe to rebind each render)
+  document.querySelectorAll('.stats-table th').forEach((th,idx)=>{
+    th.onclick=()=>{
+      // Find the sort column for this header idx
+      const entry=Object.entries(SORT_COL_TO_IDX).find(([,i])=>i===idx);
+      if(entry){
+        sortStats(entry[0],null);
+      }
+      // idx 0 (rank) and idx 1 (player name) don't sort
+    };
+  });
+
+  // Sticky-column scroll shadow: toggle .is-scrolled on wrap when scrollLeft>0
+  const wrap=document.querySelector('.stats-wrap');
+  if(wrap && !wrap.dataset.scrollBound){
+    wrap.addEventListener('scroll',()=>{
+      wrap.classList.toggle('is-scrolled',wrap.scrollLeft>0);
+    });
+    wrap.dataset.scrollBound='1';
+  }
 }
 
-// ── FIXTURES ──────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════
+// FIXTURES
+// ══════════════════════════════════════════════════════════
 async function loadFixtures(){
   document.getElementById('fix-loading').style.display='block';
   document.getElementById('fix-list').innerHTML='';
@@ -696,7 +927,7 @@ async function submitFine(){
   btn.disabled=false;
 }
 
-// ── MATCH (Quick Entry fallback — inside Captain's Portal) ──
+// ── MATCH (Quick Entry) ──────────────────────────────────────
 async function submitMatch(){
   const fixId=document.getElementById('m-fixture').value;
   const gf=parseInt(document.getElementById('m-gf').value)||0;
@@ -857,16 +1088,13 @@ function rollDice(){
 }
 
 // ══════════════════════════════════════════════════════════
-// REVEAL — MOM/DOD paper ball theatre
+// REVEAL
 // ══════════════════════════════════════════════════════════
 
-// ── Modal open/close + password gate ─────────────────────────
 function openRevealFromVote(){
   const modal=document.getElementById('reveal-modal');
   modal.classList.add('open');
-  // Ensure the modal scroll starts at the top (not wherever the page was)
   modal.scrollTop=0;
-  // If captain already authed in this session, skip password
   if(captainAuthed){
     document.getElementById('rv-pw-wrap').style.display='none';
     document.getElementById('rv-content').style.display='block';
@@ -879,7 +1107,6 @@ function openRevealFromVote(){
 }
 function closeRevealModal(){
   document.getElementById('reveal-modal').classList.remove('open');
-  // Also close the full-screen ball overlay if it was open
   const ov=document.getElementById('rv-overlay');
   if(ov.classList.contains('open'))ov.classList.remove('open');
   rvRevealing=false;
@@ -903,17 +1130,12 @@ async function checkRevealPw(){
   }
 }
 
-// ── Paper ball SVG builder ───────────────────────────────────
-// Faceted polygonal crumple: spiky outline + voronoi-ish panels, each panel
-// shaded by its angle relative to a light source (top-left). Real paper balls
-// read as "faceted mass with sharp creases" more than "smooth blob with shading".
 function buildPaperBallSVG(size){
   const big=size>=200;
   const uid='pb'+Date.now()+Math.floor(Math.random()*100000)+Math.floor(Math.random()*100000);
-  const cx=100,cy=100;  // centre of 200x200 viewbox
-  const light={x:50,y:40};  // light source (top-left)
+  const cx=100,cy=100;
+  const light={x:50,y:40};
 
-  // 1. SPIKY OUTLINE — points around a circle with random radius variation
   const outerN=big?14:11;
   const outerPts=[];
   for(let i=0;i<outerN;i++){
@@ -923,7 +1145,6 @@ function buildPaperBallSVG(size){
   }
   const outlinePath='M '+outerPts.map(p=>p.x.toFixed(1)+','+p.y.toFixed(1)).join(' L ')+' Z';
 
-  // 2. INTERIOR CRUMPLE POINTS — scattered points inside the ball for panel corners
   const interiorN=big?10:7;
   const interior=[];
   for(let i=0;i<interiorN;i++){
@@ -931,21 +1152,16 @@ function buildPaperBallSVG(size){
     const r=Math.random()*(big?60:55);
     interior.push({x:cx+Math.cos(angle)*r,y:cy+Math.sin(angle)*r});
   }
-  // Plus a few points halfway out for structure
   for(let i=0;i<(big?6:5);i++){
     const angle=(i/(big?6:5))*Math.PI*2+Math.random()*0.4;
     const r=(big?50:45)+Math.random()*15;
     interior.push({x:cx+Math.cos(angle)*r,y:cy+Math.sin(angle)*r});
   }
 
-  // 3. BUILD FACETED PANELS via fan-triangulation from interior points to outer edge
-  // We'll triangulate: pair each outer edge with its nearest interior point, forming triangles.
-  // Simple and cheap — gives paper-panel look without full Delaunay.
   const panels=[];
   for(let i=0;i<outerPts.length;i++){
     const p1=outerPts[i];
     const p2=outerPts[(i+1)%outerPts.length];
-    // Find closest interior point to edge midpoint
     const mx=(p1.x+p2.x)/2,my=(p1.y+p2.y)/2;
     let best=interior[0],bestD=Infinity;
     for(const ip of interior){
@@ -954,13 +1170,11 @@ function buildPaperBallSVG(size){
     }
     panels.push([p1,p2,best]);
   }
-  // Also build panels between adjacent interior points
   for(let i=0;i<interior.length;i++){
     for(let j=i+1;j<interior.length;j++){
       const a=interior[i],b=interior[j];
       const d=Math.hypot(a.x-b.x,a.y-b.y);
-      if(d>(big?50:45))continue;  // too far — skip
-      // Find a 3rd point that isn't too far from both
+      if(d>(big?50:45))continue;
       let best=null,bestD=Infinity;
       for(let k=0;k<interior.length;k++){
         if(k===i||k===j)continue;
@@ -972,17 +1186,13 @@ function buildPaperBallSVG(size){
     }
   }
 
-  // 4. SHADE EACH PANEL by its centroid's position relative to light
-  // Closer to light = brighter, further = darker. Plus random jitter for crumple randomness.
-  const paperBase=[245,235,210];  // warm cream RGB
+  const paperBase=[245,235,210];
   const panelSvg=[];
   for(const pan of panels){
     const c={x:(pan[0].x+pan[1].x+pan[2].x)/3,y:(pan[0].y+pan[1].y+pan[2].y)/3};
     const distToLight=Math.hypot(c.x-light.x,c.y-light.y);
-    // Normalize: distance 0 = brightest, distance 200 = darkest
     const t=Math.min(1,distToLight/160);
-    // Mix from white-ish to shadow colour — more aggressive contrast
-    const brightness=1.05-t*0.75+(Math.random()-0.5)*0.2;  // bigger range, more jitter
+    const brightness=1.05-t*0.75+(Math.random()-0.5)*0.2;
     const r=Math.max(45,Math.min(255,Math.round(paperBase[0]*brightness)));
     const g=Math.max(40,Math.min(250,Math.round(paperBase[1]*brightness)));
     const b=Math.max(30,Math.min(235,Math.round(paperBase[2]*brightness)));
@@ -990,25 +1200,21 @@ function buildPaperBallSVG(size){
     panelSvg.push(`<polygon points="${pts}" fill="rgb(${r},${g},${b})" stroke="rgba(70,45,15,0.5)" stroke-width="${big?0.55:0.4}" stroke-linejoin="bevel"/>`);
   }
 
-  // 5. CREASE LINES — sharp ridges between panels (independent, darker lines)
   const creases=[];
   const creaseCount=big?9:7;
   for(let i=0;i<creaseCount;i++){
-    // Random interior point to another random interior point
     const a=interior[Math.floor(Math.random()*interior.length)];
     const b=interior[Math.floor(Math.random()*interior.length)];
     if(a===b)continue;
     const opacity=0.25+Math.random()*0.3;
     creases.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="rgba(70,45,15,${opacity.toFixed(2)})" stroke-width="${big?0.9:0.7}" stroke-linecap="round"/>`);
   }
-  // Plus highlight ridges (white) on the lit side
   const ridges=[];
   const ridgeCount=big?5:4;
   for(let i=0;i<ridgeCount;i++){
     const a=interior[Math.floor(Math.random()*interior.length)];
     const b=interior[Math.floor(Math.random()*interior.length)];
     if(a===b)continue;
-    // Only draw if midpoint is on the lit side
     const mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
     if(Math.hypot(mx-light.x,my-light.y)>90)continue;
     ridges.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="rgba(255,253,240,0.55)" stroke-width="${big?0.7:0.5}" stroke-linecap="round"/>`);
@@ -1025,31 +1231,22 @@ function buildPaperBallSVG(size){
         <stop offset="100%" stop-color="rgba(40,25,10,0.35)"/>
       </radialGradient>
     </defs>
-    <!-- base blob fill as fallback (ensures no gaps visible) -->
     <path d="${outlinePath}" fill="rgb(230,220,195)"/>
-    <!-- faceted panels -->
     ${panelSvg.join('')}
-    <!-- creases (dark) -->
     ${creases.join('')}
-    <!-- ridges (light) -->
     ${ridges.join('')}
-    <!-- overall light wash -->
     <path d="${outlinePath}" fill="url(#${uid}-core)"/>
-    <!-- overall shadow wash -->
     <path d="${outlinePath}" fill="url(#${uid}-shadow)"/>
-    <!-- crisp outline -->
     <path d="${outlinePath}" fill="none" stroke="rgba(70,45,20,0.5)" stroke-width="${big?1.0:0.8}" stroke-linejoin="round"/>
   </svg>`;
 }
 
-// ── Data loaders ─────────────────────────────────────────────
 async function loadRevealFixtures(){
   const sel=document.getElementById('rv-fixture-sel');
   sel.innerHTML='<option value="">— Select match —</option>';
   document.getElementById('rv-stage').style.display='none';
   document.getElementById('rv-picker-hint').textContent='Loading...';
 
-  // Fetch all sessions in this season (any status — we want to handle already-revealed too)
   const{data,error}=await sb.from('match_vote_sessions')
     .select('id,fixture_id,status,whc_goals,opp_goals,eligible_players,fixtures!inner(opponent,match_date,season)')
     .eq('fixtures.season',currentSeason)
@@ -1079,7 +1276,6 @@ async function onRvFixtureChange(){
   const sessionId=document.getElementById('rv-fixture-sel').value;
   if(!sessionId){document.getElementById('rv-stage').style.display='none';return;}
 
-  // Load full session + votes
   const{data:session}=await sb.from('match_vote_sessions')
     .select('id,fixture_id,status,whc_goals,opp_goals,eligible_players,fixtures!inner(opponent,match_date)')
     .eq('id',sessionId).single();
@@ -1089,7 +1285,6 @@ async function onRvFixtureChange(){
   rvSession=session;
   rvVotes=votes||[];
 
-  // Rebuild tallies from already-revealed votes (handles page refresh mid-reveal)
   rvMomTally={};rvDodTally={};
   rvVotes.filter(v=>v.revealed).forEach(v=>{
     rvMomTally[v.mom_vote]=(rvMomTally[v.mom_vote]||0)+1;
@@ -1101,7 +1296,6 @@ async function onRvFixtureChange(){
   renderTally('mom');
   renderTally('dod');
 
-  // If all revealed already, show confirm section straight away
   const unrevealed=rvVotes.filter(v=>!v.revealed);
   if(rvVotes.length>0 && unrevealed.length===0){
     showConfirmWinners();
@@ -1169,7 +1363,6 @@ async function revealOneVote(voteId,ballEl){
   const vote=rvVotes.find(v=>v.id===voteId);
   if(!vote){rvRevealing=false;return;}
 
-  // Mark revealed in DB first (optimistic)
   try{
     await sb.from('match_votes').update({revealed:true,revealed_at:new Date().toISOString()}).eq('id',voteId);
   }catch(e){
@@ -1179,43 +1372,33 @@ async function revealOneVote(voteId,ballEl){
   }
   vote.revealed=true;
 
-  // Update tallies
   rvMomTally[vote.mom_vote]=(rvMomTally[vote.mom_vote]||0)+1;
   rvDodTally[vote.dod_vote]=(rvDodTally[vote.dod_vote]||0)+1;
 
-  // Ball fades from pile
   ballEl.classList.add('discarded');
 
-  // Open full-screen overlay
   const overlay=document.getElementById('rv-overlay');
   const bigBall=document.getElementById('rv-ball-big');
   const paper=document.getElementById('rv-paper');
   const doneBtn=document.getElementById('rv-done-btn');
 
-  // Inject a freshly-generated big paper ball SVG
   bigBall.innerHTML=buildPaperBallSVG(280);
 
-  // Populate paper content
   document.getElementById('rv-paper-mom-name').textContent=vote.mom_vote;
   document.getElementById('rv-paper-mom-reason').textContent='"'+vote.mom_reason+'"';
   document.getElementById('rv-paper-dod-name').textContent=vote.dod_vote;
   document.getElementById('rv-paper-dod-reason').textContent='"'+vote.dod_reason+'"';
 
-  // Reset animation states
   bigBall.className='rv-ball-big';
   paper.className='rv-paper';
   doneBtn.style.display='none';
-  void bigBall.offsetWidth;  // force reflow
+  void bigBall.offsetWidth;
 
   overlay.classList.add('open');
 
-  // Stage 1: ball flies in
   setTimeout(()=>bigBall.classList.add('animating'),50);
-  // Stage 2: ball unfolds (after 0.7s)
   setTimeout(()=>bigBall.classList.add('unfolding'),750);
-  // Stage 3: paper reveals (triggered by its own animation-delay in CSS)
   setTimeout(()=>paper.classList.add('reveal'),800);
-  // Stage 4: show done button
   setTimeout(()=>{doneBtn.style.display='inline-block';},1700);
 }
 
@@ -1224,14 +1407,11 @@ function dismissReveal(){
   overlay.classList.remove('open');
   rvRevealing=false;
 
-  // Remove the ball element from pile (it animated out)
   setTimeout(()=>{
-    // Re-render pile to sync — discarded ball is removed, count updates
     renderRevealPile();
     renderTally('mom');
     renderTally('dod');
 
-    // Check if all revealed now
     const unrevealed=rvVotes.filter(v=>!v.revealed);
     if(unrevealed.length===0 && rvVotes.length>0){
       showConfirmWinners();
@@ -1245,7 +1425,6 @@ function showConfirmWinners(){
   const momLeader=momEntries[0]?momEntries[0][0]:'';
   const dodLeader=dodEntries[0]?dodEntries[0][0]:'';
 
-  // Populate dropdowns — full player list, leaders first
   const buildDropdown=(id,leader)=>{
     const sel=document.getElementById(id);
     sel.innerHTML='';
@@ -1260,11 +1439,9 @@ function showConfirmWinners(){
   buildDropdown('rv-mom-winner',momLeader);
   buildDropdown('rv-dod-winner',dodLeader);
 
-  // Render stats grid with only eligible players
   const tbody=document.getElementById('rv-stats-rows');
   tbody.innerHTML='';
   const eligible=rvSession.eligible_players||[];
-  // Fallback: if no eligible list, show all players
   const rowList=eligible.length?eligible:PLAYERS;
   rowList.forEach(p=>{
     const tr=document.createElement('tr');tr.dataset.player=p;
@@ -1292,13 +1469,11 @@ async function finaliseReveal(){
   const pts=result==='W'?3:result==='D'?1:0;
 
   try{
-    // 1. Update fixtures row
     const{error:fe}=await sb.from('fixtures').update({
       whc_goals:gf,opp_goals:ga,result,match_points:pts,mom,dod
     }).eq('id',rvSession.fixture_id);
     if(fe)throw fe;
 
-    // 2. Build match_stats inserts
     const rows=document.querySelectorAll('#rv-stats-rows tr');
     const inserts=[];
     rows.forEach(row=>{
@@ -1320,13 +1495,11 @@ async function finaliseReveal(){
       });
     });
     if(inserts.length){
-      // Delete any existing rows for this fixture first (in case of re-finalise)
       await sb.from('match_stats').delete().eq('fixture_id',rvSession.fixture_id);
       const{error:se}=await sb.from('match_stats').insert(inserts);
       if(se)throw se;
     }
 
-    // 3. Mark session complete
     await sb.from('match_vote_sessions').update({
       status:'complete',
       completed_at:new Date().toISOString()
@@ -1344,8 +1517,6 @@ async function finaliseReveal(){
     btn.disabled=false;btn.textContent='🏁 Finalise Match';
   }
 }
-
-
 
 function showAlert(el,type,msg){el.className=`alert ${type} show`;el.textContent=msg;setTimeout(()=>el.classList.remove('show'),4000);}
 
