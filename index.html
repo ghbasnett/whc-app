@@ -50,6 +50,8 @@
           <button class="cp-tab active" onclick="showCpTab('cp-teamsheet',this)">📋 Teamsheet</button>
           <button class="cp-tab" onclick="showCpTab('cp-votesetup',this)">🗳 Start Vote</button>
           <button class="cp-tab" onclick="showCpTab('cp-quickstats',this)">⚡ Quick Entry</button>
+          <button class="cp-tab" onclick="showCpTab('cp-players',this)">👥 Players</button>
+          <button class="cp-tab" onclick="showCpTab('cp-fixtures',this)">📅 Fixtures</button>
         </div>
 
         <!-- ── TEAMSHEET TAB ───────────────────── -->
@@ -243,6 +245,82 @@
             <div class="form-group"><label>Dick of the Day</label><select id="m-dod"><option value="">— Select —</option></select></div>
           </div>
           <button class="submit-btn" onclick="submitMatch()">Save Match</button>
+        </div>
+
+        <!-- ── PLAYERS TAB ────────────────────────────────── -->
+        <div id="cp-players" class="cp-tab-content">
+          <div class="alert" id="pl-alert"></div>
+
+          <div class="card">
+            <h3>Add a New Player</h3>
+            <div class="two-col">
+              <div class="form-group">
+                <label>Name</label>
+                <input type="text" id="pl-new-name" placeholder="e.g. Tom Smith">
+              </div>
+              <div class="form-group">
+                <label>Role</label>
+                <select id="pl-new-role">
+                  <option value="player">Player</option>
+                  <option value="gk">Goalkeeper</option>
+                  <option value="cap">Captain</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label style="display:flex;align-items:center;gap:8px;font-size:13px;text-transform:none;letter-spacing:0;color:#ccc;font-weight:400;">
+                <input type="checkbox" id="pl-new-active" checked style="width:16px;height:16px;accent-color:var(--pink);">
+                Active (visible in dropdowns)
+              </label>
+            </div>
+            <button class="submit-btn" onclick="addPlayer()">+ Add Player</button>
+          </div>
+
+          <div class="card">
+            <h3>Squad Roster</h3>
+            <p class="section-sub">Inactive players are hidden from vote/fine/match dropdowns but stats preserved. Click ✏️ to edit name/role, 🗑 to permanently delete.</p>
+            <div id="pl-list" class="loading"><div class="spinner"></div><br>Loading...</div>
+          </div>
+        </div>
+
+        <!-- ── FIXTURES TAB ───────────────────────────────── -->
+        <div id="cp-fixtures" class="cp-tab-content">
+          <div class="alert" id="fx-alert"></div>
+
+          <div class="card">
+            <h3>Add Fixture (<span id="fx-new-season">2025-26</span>)</h3>
+            <div class="two-col">
+              <div class="form-group">
+                <label>Date</label>
+                <input type="date" id="fx-new-date">
+              </div>
+              <div class="form-group">
+                <label>Kick-off</label>
+                <input type="time" id="fx-new-time">
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Opponent</label>
+              <input type="text" id="fx-new-opp" placeholder="e.g. Old Kingstonians 3s">
+            </div>
+            <div class="two-col">
+              <div class="form-group">
+                <label>Venue</label>
+                <input type="text" id="fx-new-venue" placeholder="Home / Away / Pitch name">
+              </div>
+              <div class="form-group">
+                <label>Competition</label>
+                <input type="text" id="fx-new-comp" placeholder="League / Cup">
+              </div>
+            </div>
+            <button class="submit-btn" onclick="addFixture()">+ Add Fixture</button>
+          </div>
+
+          <div class="card">
+            <h3>Fixtures — <span id="fx-list-season">2025-26</span></h3>
+            <p class="section-sub">Click a fixture to expand and edit. Delete will cascade-remove match stats, votes, and reveal data for that fixture.</p>
+            <div id="fx-list" class="loading"><div class="spinner"></div><br>Loading...</div>
+          </div>
         </div>
       </div>
     </div>
