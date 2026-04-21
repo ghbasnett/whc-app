@@ -2,27 +2,64 @@ const SUPABASE_URL='https://kxqgtuiybwtubavxbaxf.supabase.co';
 const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt4cWd0dWl5Ynd0dWJhdnhiYXhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2Mjk2NTAsImV4cCI6MjA5MDIwNTY1MH0.AxtJY6ujK4g9F4qgHshF7wpSCwdJXEhuvsbH6vi3rAU';
 let PLAYERS=[];
 const PREDICTIONS={'George':{g:3,a:12,app:16},'Dan MM':{g:8,a:5,app:17},'Colesy':{g:3,a:6,app:17},'Ryan':{g:7,a:6,app:20},'Stretch':{g:9,a:8,app:13},'Charge':{g:16,a:7,app:21},'Harvey':{g:15,a:6,app:18},'Hector':{g:1,a:1,app:17},'Ewan':{g:2,a:5,app:12},'Jack':{g:11,a:4,app:18},'Harry':{g:5,a:10,app:15},'Seb C':{g:0,a:2,app:15},'Seb S':{g:3,a:7,app:17},'TH':{g:0,a:0,app:1},'Ollie J':{g:0,a:8,app:15}};
-const IND_FINES={'Colesy':['Double baby tax','Values babies over hockey #epstein','Number of sticks purchased this year','Polluting the environment','Moving to Richmond solely because he\'s rich'],'Tom M':['Weeks spent in South Africa','Scores more in training than matches','Where\'s the team bri?'],'Rick':['Shit original name','Who scores more — your missus or you?','Really a 6s player','What is your shirt number?'],'Jack':['Bye bye missus','Good at marathons — unavailable on Saturdays','Parkrun before game day'],'Harvey':['Watched rugby instead of playing','Are you a member of the Chinese Communist Party?','Marrying a man — his name is Charlie','Moving to Richmond solely because he\'s rich','Went to Charterhouse — makes sense you charter ships','Generally smelly human (Charlie validated)','Shin infection from unwashed shin pads'],'Hector':['Too Irish for my liking','Marrying someone posher than your name','Not inviting TH to wedding but inviting 40 family members','Horace the Hung — didn\'t get the genes'],'Ollie J':['Never seen him at teas','Never seen him pass right'],'Ryan':['3 at the back','15% tariff on drinks — getting married in US','Shit Chris Evans','Who is captaining after your shit show?','Short','Passes to centre forwards'],'TH':['Would be better off with George\'s knee','"This is my last year" — again'],'Tom W':['Sieve','Shin splints','No fans in attendance','Future captain (allegedly)'],'Harry':['Better hockey player now he\'s single','Still skinny','Blanking Hector on the tube','Stayed on tube longer with a girl who has a girlfriend','What\'s your handicap?'],'Charge':['Goals under target','Shocked to see you here without Stretch','Times at the clubhouse in the last 3 years'],'Max K':['DOD jacket','Stick throws','Trying to decide his own punishment','General tardiness'],'Seb S':['Poor family roots','General tardiness','What is your personality now you don\'t bobble passes?','Sick on the balcony']};
 
 const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
-let currentSeason='2025-26',statsData=[],currentSort='ppg';
-let completedFixturesCount=0;   // total completed fixtures this season
-let minAppsThreshold=0;          // derived: ceil(0.2 * completedFixturesCount), only enforced when completedFixturesCount>=10
-let thresholdActive=false;       // true only when >=10 completed fixtures
+
+// ── SEASON LOGIC ─────────────────────────────────────────────
+// A season runs Sept 1 → Aug 31. On Sept 1 each year, the default flips to the new season.
+// Before Sept 1 2026 → '2025-26'. On/after Sept 1 2026 → '2026-27'. Etc.
+function getDefaultSeason(date){
+  const d=date||new Date();
+  const year=d.getFullYear();
+  const month=d.getMonth(); // 0-indexed; Sept = 8
+  const startYear=month>=8?year:year-1;
+  const endYY=String(startYear+1).slice(-2);
+  return startYear+'-'+endYY;
+}
+function getSeasonOptions(){
+  const defaultSeason=getDefaultSeason();
+  const defaultStartYear=parseInt(defaultSeason.split('-')[0]);
+  const startYear=2025; // earliest season
+  const endYear=defaultStartYear+1; // include one future season ahead
+  const seasons=[];
+  for(let y=startYear;y<=endYear;y++){
+    const endYY=String(y+1).slice(-2);
+    seasons.push(y+'-'+endYY);
+  }
+  return seasons.reverse(); // newest first in dropdown
+}
+function populateSeasonDropdown(){
+  const sel=document.getElementById('season-sel');
+  if(!sel)return;
+  const defaultSeason=getDefaultSeason();
+  const seasons=getSeasonOptions();
+  sel.innerHTML='';
+  seasons.forEach(s=>{
+    const o=document.createElement('option');
+    o.value=s;o.textContent=s;
+    if(s===defaultSeason)o.selected=true;
+    sel.appendChild(o);
+  });
+  currentSeason=defaultSeason;
+}
+
+let currentSeason=getDefaultSeason(),statsData=[],currentSort='ppg';
+let completedFixturesCount=0;
+let minAppsThreshold=0;
+let thresholdActive=false;
 let wheelReady=false,spinning=false,wheelAngle=0,audioCtx=null,spinNodes=[];
 let meetingPwHash=null,captainPwHash=null,captainAuthed=false;
 let tsSquad=[];
 let vsSquad=[];
 let currentVoteSession=null;
-// REVEAL state
 let rvSession=null;
 let rvVotes=[];
 let rvRevealing=false;
 let rvMomTally={};
 let rvDodTally={};
+let plEditingId=null;
+let fxEditingId=null;
 
-// Map sort column → header cell index (0-based within thead row)
-// Columns: # | Player | Apps | Pts | G | A | G+A | MOM🏆 | DOD🏆 | PPG
 const SORT_COL_TO_IDX={
   appearances:2,
   total_points:3,
@@ -33,7 +70,6 @@ const SORT_COL_TO_IDX={
   dod_wins:8,
   ppg:9
 };
-// Friendly label for each sort column, used in hero card
 const SORT_LABELS={
   ppg:{label:'Points Per Game',unit:'PPG'},
   goals:{label:'Top Scorer',unit:'GOALS'},
@@ -44,6 +80,9 @@ const SORT_LABELS={
   mom_wins:{label:'MOM Wins',unit:'MOM'},
   dod_wins:{label:'DOD Wins',unit:'DOD'}
 };
+
+// Small HTML escape helper (used in multiple render fns)
+function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
 // ── PLAYER LOADER ────────────────────────────────────────────
 async function loadPlayersFromDB(){
@@ -73,12 +112,24 @@ function showSection(id,btn){
 }
 function onSeasonChange(){
   currentSeason=document.getElementById('season-sel').value;
+  // Update the fixtures management tab season labels
+  const fxSeason=document.getElementById('fx-new-season');if(fxSeason)fxSeason.textContent=currentSeason;
+  const fxListSeason=document.getElementById('fx-list-season');if(fxListSeason)fxListSeason.textContent=currentSeason;
   const active=document.querySelector('.section.active');
   if(!active)return;
   const id=active.id.replace('sec-','');
   if(id==='stats')loadStats();
   if(id==='fixtures')loadFixtures();
   if(id==='vote')loadOpenVoteSession();
+  if(id==='fine')loadFines();
+  // If captain portal is open on a season-sensitive tab, refresh it
+  const cpModal=document.getElementById('captain-modal');
+  if(cpModal&&cpModal.classList.contains('open')&&captainAuthed){
+    const fxTab=document.getElementById('cp-fixtures');
+    const plTab=document.getElementById('cp-players');
+    if(fxTab&&fxTab.classList.contains('active'))loadFixturesList();
+    if(plTab&&plTab.classList.contains('active'))loadPlayersList();
+  }
 }
 function showMtab(id,btn){
   document.querySelectorAll('.msection').forEach(s=>s.classList.remove('active'));
@@ -128,6 +179,8 @@ function showCpTab(id,btn){
   btn.classList.add('active');
   if(id==='cp-votesetup')loadVsData();
   if(id==='cp-quickstats')loadFixtureDropdown();
+  if(id==='cp-players')loadPlayersList();
+  if(id==='cp-fixtures')loadFixturesList();
 }
 
 // ── CAPTAIN VOTE SETUP ───────────────────────────────────────
@@ -495,6 +548,7 @@ function toggleHideNotPlaying(){const hide=document.getElementById('hide-not-pla
 
 // ── INIT ──────────────────────────────────────────────────────
 async function init(){
+  populateSeasonDropdown();
   await loadPlayersFromDB();
   if(!PLAYERS.length){
     console.error('No players loaded from database. App will have empty dropdowns.');
@@ -530,17 +584,15 @@ async function loadFixtureDropdown(){
 function onFixtureSelect(){updateGoalsTally();}
 
 // ══════════════════════════════════════════════════════════
-// STATS — rebuilt
+// STATS
 // ══════════════════════════════════════════════════════════
 
 async function loadStats(){
   document.getElementById('stats-loading').style.display='block';
   document.getElementById('stats-wrap').style.display='none';
-  // Also clear any hero/threshold elements from a previous render
   removeStatsExtras();
 
   try{
-    // Fetch in parallel: stats view + completed fixture count
     const [statsRes,fixtureRes]=await Promise.all([
       sb.from('player_stats_view').select('*').eq('season',currentSeason),
       sb.from('fixtures').select('id',{count:'exact',head:true}).eq('season',currentSeason).not('result','is',null)
@@ -566,20 +618,16 @@ function removeStatsExtras(){
 
 function sortStats(col,btn){
   currentSort=col;
-  // Sync tab UI if a tab matches this column
   const tabMap={ppg:0,goals:1,assists:2,appearances:3};
   if(tabMap.hasOwnProperty(col)){
     const tabs=document.querySelectorAll('.sort-tab');
     tabs.forEach((b,i)=>b.classList.toggle('active',i===tabMap[col]));
   } else {
-    // Column sort with no matching tab — clear tab active state
     document.querySelectorAll('.sort-tab').forEach(b=>b.classList.remove('active'));
   }
   renderStats(col);
 }
 
-// Get sort value for a player row on a given column.
-// Handles synthetic goals_plus_assists.
 function getSortValue(row,col){
   if(col==='goals_plus_assists')return (parseInt(row.goals)||0)+(parseInt(row.assists)||0);
   return parseFloat(row[col])||0;
@@ -611,7 +659,6 @@ function renderLeaderHero(leader,col){
       <div class="lh-stat-val">${displayVal}</div>
       <div class="lh-stat-label">${info.unit}</div>
     </div>`;
-  // Insert just before the sort-tabs bar
   const tabsBar=document.querySelector('#sec-stats .sort-tabs');
   tabsBar.parentNode.insertBefore(hero,tabsBar);
 }
@@ -623,7 +670,6 @@ function renderThresholdPill(){
   pill.className='threshold-pill';
   pill.id='stats-threshold-pill';
   pill.innerHTML=`ℹ Min apps threshold: <strong style="margin-left:3px">${minAppsThreshold}</strong><span style="margin-left:4px;color:#666">(20% of ${completedFixturesCount} played)</span>`;
-  // Insert just before the stats-wrap
   const wrap=document.getElementById('stats-wrap');
   wrap.parentNode.insertBefore(pill,wrap);
 }
@@ -632,7 +678,6 @@ function renderStats(col){
   document.getElementById('stats-loading').style.display='none';
   document.getElementById('stats-wrap').style.display='block';
 
-  // Partition into qualified / unqualified
   const qualified=[];
   const unqualified=[];
   statsData.forEach(r=>{
@@ -644,22 +689,17 @@ function renderStats(col){
     }
   });
 
-  // Sort each group by the active column
   const sortFn=(a,b)=>getSortValue(b,col)-getSortValue(a,col);
   qualified.sort(sortFn);
   unqualified.sort(sortFn);
 
-  // Compute top values *only among qualified* so unqualified players don't accidentally take the badge
   const topG=qualified.length?Math.max(...qualified.map(r=>parseInt(r.goals)||0)):0;
   const topA=qualified.length?Math.max(...qualified.map(r=>parseInt(r.assists)||0)):0;
-  // Max value in the active sort column across qualified (for inline bars)
   const topSortVal=qualified.length?Math.max(...qualified.map(r=>getSortValue(r,col)),0):0;
 
-  // Leader hero + threshold pill
   renderThresholdPill();
   renderLeaderHero(qualified[0],col);
 
-  // Sync column-active header class
   document.querySelectorAll('.stats-table th').forEach((th,idx)=>{
     th.classList.toggle('sort-active',idx===SORT_COL_TO_IDX[col]);
   });
@@ -671,7 +711,6 @@ function renderStats(col){
     return;
   }
 
-  // Helper to render a single row
   function renderRow(r,rank,isUnqualified){
     const g=parseInt(r.goals)||0,a=parseInt(r.assists)||0,ppg=parseFloat(r.ppg||0);
     const apps=parseInt(r.appearances)||0;
@@ -679,11 +718,9 @@ function renderStats(col){
     const momWins=parseInt(r.mom_wins)||0;
     const dodWins=parseInt(r.dod_wins)||0;
     const gPlusA=g+a;
-    // Top badges only for qualified
     const isTopG=!isUnqualified&&g>0&&g===topG;
     const isTopA=!isUnqualified&&a>0&&a===topA;
 
-    // Rank pill: only qualified get podium colours, unqualified get no circle
     let rNum;
     if(isUnqualified){
       rNum=`<span class="rank-n">—</span>`;
@@ -708,7 +745,6 @@ function renderStats(col){
       if(isTopA&&col==='assists')tr.classList.add('top-assists');
     }
 
-    // Build each cell, attaching a bar-wrap to whichever is the active sort column
     const cells=[
       {html:rNum,idx:1},
       {html:`${r.player_name}${badges}${unqTag}`,idx:2},
@@ -727,7 +763,6 @@ function renderStats(col){
       td.innerHTML=c.html;
       if(c.sortCol===col){
         td.classList.add('sort-active');
-        // Inline bar (only qualified rows & positive value)
         if(!isUnqualified && topSortVal>0){
           const thisVal=getSortValue(r,col);
           const pct=Math.max(0,Math.min(100,(thisVal/topSortVal)*100));
@@ -743,10 +778,8 @@ function renderStats(col){
     return tr;
   }
 
-  // Render qualified
   qualified.forEach((r,i)=>tbody.appendChild(renderRow(r,i+1,false)));
 
-  // Divider (only show if both groups have rows)
   if(qualified.length && unqualified.length){
     const divRow=document.createElement('tr');
     divRow.className='divider-row';
@@ -754,22 +787,17 @@ function renderStats(col){
     tbody.appendChild(divRow);
   }
 
-  // Render unqualified
   unqualified.forEach(r=>tbody.appendChild(renderRow(r,null,true)));
 
-  // Hook up clickable column headers (once — but safe to rebind each render)
   document.querySelectorAll('.stats-table th').forEach((th,idx)=>{
     th.onclick=()=>{
-      // Find the sort column for this header idx
       const entry=Object.entries(SORT_COL_TO_IDX).find(([,i])=>i===idx);
       if(entry){
         sortStats(entry[0],null);
       }
-      // idx 0 (rank) and idx 1 (player name) don't sort
     };
   });
 
-  // Sticky-column scroll shadow: toggle .is-scrolled on wrap when scrollLeft>0
   const wrap=document.querySelector('.stats-wrap');
   if(wrap && !wrap.dataset.scrollBound){
     wrap.addEventListener('scroll',()=>{
@@ -897,7 +925,7 @@ async function loadFines(){
   document.getElementById('fines-loading').style.display='block';
   document.getElementById('fines-list').innerHTML='';
   try{
-    const{data,error}=await sb.from('fines').select('*').order('created_at',{ascending:false}).limit(40);
+    const{data,error}=await sb.from('fines').select('*').eq('season',currentSeason).order('created_at',{ascending:false}).limit(40);
     if(error)throw error;
     document.getElementById('fines-loading').style.display='none';
     const list=document.getElementById('fines-list');
@@ -918,7 +946,7 @@ async function submitFine(){
   if(!player||!desc){showAlert(al,'error','Select a player and enter a description.');return;}
   const btn=document.querySelector('#sec-fine .submit-btn');btn.disabled=true;
   try{
-    const{error}=await sb.from('fines').insert({player_name:player,description:desc,submitted_by:by||'Anonymous'});
+    const{error}=await sb.from('fines').insert({player_name:player,description:desc,submitted_by:by||'Anonymous',season:currentSeason});
     if(error)throw error;
     showAlert(al,'success',`Fine submitted against ${player}!`);
     document.getElementById('fine-desc').value='';document.getElementById('fine-by').value='';document.getElementById('fine-player').value='';
@@ -1004,14 +1032,30 @@ function dc(pred,actual){
 // ── IND FINES ─────────────────────────────────────────────────
 async function renderIndFines(){
   const grid=document.getElementById('ind-fines-grid');grid.innerHTML='';
-  const{data}=await sb.from('fines').select('player_name,description').order('created_at',{ascending:true});
-  const live={};(data||[]).forEach(r=>{if(!live[r.player_name])live[r.player_name]=[];live[r.player_name].push(r.description);});
-  const all=new Set([...Object.keys(IND_FINES),...Object.keys(live)]);
-  all.forEach(name=>{
-    const pre=IND_FINES[name]||[],lv=live[name]||[];
-    if(!pre.length&&!lv.length)return;
+  // All fines now live in the DB, season-scoped.
+  const{data}=await sb.from('fines').select('player_name,description,submitted_by').eq('season',currentSeason).order('created_at',{ascending:true});
+  const rows=data||[];
+  if(!rows.length){
+    grid.innerHTML='<p class="empty">No individual fines recorded for '+currentSeason+' yet.</p>';
+    return;
+  }
+  // Group by player_name, preserving DB order within each group
+  const byPlayer={};
+  rows.forEach(r=>{
+    if(!byPlayer[r.player_name])byPlayer[r.player_name]=[];
+    byPlayer[r.player_name].push(r);
+  });
+  Object.keys(byPlayer).forEach(name=>{
+    const fines=byPlayer[name];
     const card=document.createElement('div');card.className='player-card';
-    card.innerHTML=`<div class="pcard-name">🏑 ${name}</div><ul>${pre.map(f=>`<li>${f}</li>`).join('')}${lv.map(f=>`<li style="color:var(--pink);font-style:italic">📱 ${f}</li>`).join('')}</ul>`;
+    const items=fines.map(f=>{
+      // Distinguish live-submitted fines from pre-loaded ones (italic + pink)
+      const isLive=f.submitted_by&&f.submitted_by!=='Pre-loaded';
+      return isLive
+        ?`<li style="color:var(--pink);font-style:italic">📱 ${escapeHtml(f.description)}</li>`
+        :`<li>${escapeHtml(f.description)}</li>`;
+    }).join('');
+    card.innerHTML=`<div class="pcard-name">🏑 ${escapeHtml(name)}</div><ul>${items}</ul>`;
     grid.appendChild(card);
   });
 }
@@ -1519,6 +1563,350 @@ async function finaliseReveal(){
 }
 
 function showAlert(el,type,msg){el.className=`alert ${type} show`;el.textContent=msg;setTimeout(()=>el.classList.remove('show'),4000);}
+
+// ══════════════════════════════════════════════════════════
+// CAPTAIN PORTAL — PLAYERS TAB
+// ══════════════════════════════════════════════════════════
+
+async function loadPlayersList(){
+  const list=document.getElementById('pl-list');
+  list.className='loading';
+  list.innerHTML='<div class="spinner"></div><br>Loading...';
+  const{data,error}=await sb.from('players').select('*').order('sort_order',{ascending:true});
+  if(error){list.className='';list.innerHTML='<p class="empty" style="color:#f44336">Failed to load: '+error.message+'</p>';return;}
+  renderPlayersList(data||[]);
+}
+
+function renderPlayersList(players){
+  const list=document.getElementById('pl-list');
+  list.className='';
+  if(!players.length){list.innerHTML='<p class="empty">No players yet. Add one above.</p>';return;}
+  list.innerHTML='';
+  players.forEach(p=>{
+    const row=document.createElement('div');
+    row.className='pl-row'+(p.active?'':' inactive')+(plEditingId===p.id?' editing':'');
+    row.dataset.id=p.id;
+    if(plEditingId===p.id){
+      row.innerHTML=`<div class="pl-row-edit">
+        <input type="text" data-field="name" value="${escapeHtml(p.name)}" placeholder="Name">
+        <select data-field="role">
+          <option value="player"${p.role==='player'?' selected':''}>Player</option>
+          <option value="gk"${p.role==='gk'?' selected':''}>Goalkeeper</option>
+          <option value="cap"${p.role==='cap'?' selected':''}>Captain</option>
+        </select>
+        <div class="pl-save-cancel">
+          <button class="pl-save-btn" onclick="savePlayerEdit(${p.id})">Save</button>
+          <button class="pl-cancel-btn" onclick="cancelPlayerEdit()">✕</button>
+        </div>
+      </div>`;
+    } else {
+      const roleLabel=p.role==='gk'?'GK':p.role==='cap'?'©':'P';
+      const activeBtnCls=p.active?'active-toggle':'active-toggle off';
+      const activeTitle=p.active?'Active — click to deactivate':'Inactive — click to activate';
+      row.innerHTML=`
+        <div class="pl-row-main">
+          <span class="pl-row-name">${escapeHtml(p.name)}</span>
+          <span class="pl-row-badge ${p.role||'player'}">${roleLabel}</span>
+        </div>
+        <div class="pl-row-actions">
+          <button class="pl-icon-btn ${activeBtnCls}" title="${activeTitle}" onclick="togglePlayerActive(${p.id},${p.active?'false':'true'})">${p.active?'●':'○'}</button>
+          <button class="pl-icon-btn" title="Edit" onclick="startPlayerEdit(${p.id})">✏️</button>
+          <button class="pl-icon-btn danger" title="Delete permanently" onclick="deletePlayer(${p.id},'${escapeHtml(p.name).replace(/'/g,"&#39;")}')">🗑</button>
+        </div>`;
+    }
+    list.appendChild(row);
+  });
+}
+
+async function addPlayer(){
+  const name=document.getElementById('pl-new-name').value.trim();
+  const role=document.getElementById('pl-new-role').value;
+  const active=document.getElementById('pl-new-active').checked;
+  const al=document.getElementById('pl-alert');
+  if(!name){showAlert(al,'error','Name is required.');return;}
+  // Auto-assign sort_order: max existing + 10 (new players go to end)
+  const{data:existing}=await sb.from('players').select('sort_order').order('sort_order',{ascending:false}).limit(1);
+  const sort_order=((existing&&existing[0]?existing[0].sort_order:0)||0)+10;
+  try{
+    const{error}=await sb.from('players').insert({name,role,sort_order,active});
+    if(error)throw error;
+    showAlert(al,'success','Added '+name+'.');
+    document.getElementById('pl-new-name').value='';
+    document.getElementById('pl-new-role').value='player';
+    document.getElementById('pl-new-active').checked=true;
+    loadPlayersList();
+    await loadPlayersFromDB();
+    refreshPlayerDropdowns();
+  }catch(e){
+    showAlert(al,'error','Failed: '+e.message);
+  }
+}
+
+function startPlayerEdit(id){
+  plEditingId=id;
+  loadPlayersList();
+}
+function cancelPlayerEdit(){
+  plEditingId=null;
+  loadPlayersList();
+}
+
+async function savePlayerEdit(id){
+  const row=document.querySelector('.pl-row[data-id="'+id+'"]');
+  if(!row)return;
+  const name=row.querySelector('[data-field="name"]').value.trim();
+  const role=row.querySelector('[data-field="role"]').value;
+  const al=document.getElementById('pl-alert');
+  if(!name){showAlert(al,'error','Name cannot be empty.');return;}
+  try{
+    const{error}=await sb.from('players').update({name,role}).eq('id',id);
+    if(error)throw error;
+    plEditingId=null;
+    showAlert(al,'success','Updated.');
+    loadPlayersList();
+    await loadPlayersFromDB();
+    refreshPlayerDropdowns();
+  }catch(e){
+    showAlert(al,'error','Failed: '+e.message);
+  }
+}
+
+async function togglePlayerActive(id,newVal){
+  try{
+    const{error}=await sb.from('players').update({active:newVal}).eq('id',id);
+    if(error)throw error;
+    loadPlayersList();
+    await loadPlayersFromDB();
+    refreshPlayerDropdowns();
+  }catch(e){
+    showAlert(document.getElementById('pl-alert'),'error','Failed: '+e.message);
+  }
+}
+
+async function deletePlayer(id,name){
+  if(!confirm(`Permanently delete ${name}? Their historic stats will remain in match_stats (tagged by name), but they'll be removed from the squad roster. This cannot be undone.`))return;
+  try{
+    const{error}=await sb.from('players').delete().eq('id',id);
+    if(error)throw error;
+    showAlert(document.getElementById('pl-alert'),'success','Deleted '+name+'.');
+    loadPlayersList();
+    await loadPlayersFromDB();
+    refreshPlayerDropdowns();
+  }catch(e){
+    showAlert(document.getElementById('pl-alert'),'error','Failed: '+e.message);
+  }
+}
+
+function refreshPlayerDropdowns(){
+  ['fine-player','m-mom','m-dod'].forEach(id=>{
+    const sel=document.getElementById(id);
+    if(!sel)return;
+    const current=sel.value;
+    sel.innerHTML='<option value="">— Select —</option>';
+    PLAYERS.forEach(p=>{const o=document.createElement('option');o.value=o.textContent=p;sel.appendChild(o);});
+    if(PLAYERS.includes(current))sel.value=current;
+  });
+  const tbody=document.getElementById('prows');
+  if(tbody && tbody.children.length){
+    tbody.innerHTML='';
+    PLAYERS.forEach(p=>{
+      const tr=document.createElement('tr');tr.dataset.player=p;
+      const tdName=document.createElement('td');
+      const cb=document.createElement('input');cb.type='checkbox';cb.className='p-played';
+      cb.style.cssText='width:15px;height:15px;accent-color:var(--pink);cursor:pointer;vertical-align:middle;margin-right:7px;';
+      cb.addEventListener('change',()=>{updateGoalsTally();if(document.getElementById('hide-not-playing').checked)toggleHideNotPlaying();});
+      const ns=document.createElement('span');ns.style.cssText='font-size:12px;font-weight:600;color:#fff;vertical-align:middle;';ns.textContent=p;
+      tdName.appendChild(cb);tdName.appendChild(ns);tr.appendChild(tdName);
+      [['p-mom',''],['p-dod',''],['p-goals',''],['p-assists',''],['p-green','green-s'],['p-yellow','yellow-s'],['p-red','red-s']].forEach(([cls,tint])=>{const td=document.createElement('td');td.appendChild(makeStepper(cls,tint));tr.appendChild(td);});
+      tbody.appendChild(tr);
+    });
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// CAPTAIN PORTAL — FIXTURES TAB
+// ══════════════════════════════════════════════════════════
+
+async function loadFixturesList(){
+  document.getElementById('fx-new-season').textContent=currentSeason;
+  document.getElementById('fx-list-season').textContent=currentSeason;
+
+  const list=document.getElementById('fx-list');
+  list.className='loading';
+  list.innerHTML='<div class="spinner"></div><br>Loading...';
+  const{data,error}=await sb.from('fixtures').select('*').eq('season',currentSeason).order('match_date',{ascending:true});
+  if(error){list.className='';list.innerHTML='<p class="empty" style="color:#f44336">Failed to load: '+error.message+'</p>';return;}
+  renderFixturesList(data||[]);
+}
+
+function renderFixturesList(fixtures){
+  const list=document.getElementById('fx-list');
+  list.className='';
+  if(!fixtures.length){list.innerHTML='<p class="empty">No fixtures for '+currentSeason+' yet. Add one above.</p>';return;}
+  list.innerHTML='';
+  fixtures.forEach(f=>{
+    const row=document.createElement('div');
+    row.className='fx-row'+(fxEditingId===f.id?' editing':'');
+    row.dataset.id=f.id;
+    const d=new Date(f.match_date+'T00:00:00');
+    const num=d.getDate();
+    const mon=d.toLocaleDateString('en-GB',{month:'short'});
+    const resultMarkup=f.result?`<span class="fxm-result ${f.result}">${f.result}</span> ${f.whc_goals}–${f.opp_goals}`:'<span class="fxm-upcoming">Upcoming</span>';
+    row.innerHTML=`
+      <div class="fx-row-head" onclick="toggleFixtureEdit(${f.id})">
+        <div class="fx-row-date">
+          <div class="fxd-num">${num}</div>
+          <div class="fxd-mon">${mon}</div>
+        </div>
+        <div class="fx-row-info">
+          <div class="fx-row-opp">${escapeHtml(f.opponent)}</div>
+          <div class="fx-row-meta">
+            ${resultMarkup}
+            ${f.kick_off_time?`<span>🕐 ${f.kick_off_time}</span>`:''}
+            ${f.venue?`<span>📍 ${escapeHtml(f.venue)}</span>`:''}
+          </div>
+        </div>
+        <span class="fx-chev">▼</span>
+      </div>
+      <div class="fx-row-edit">
+        <div class="fx-edit-grid">
+          <div class="fx-edit-field">
+            <label>Date</label>
+            <input type="date" data-field="match_date" value="${f.match_date||''}">
+          </div>
+          <div class="fx-edit-field">
+            <label>Kick-off</label>
+            <input type="time" data-field="kick_off_time" value="${f.kick_off_time||''}">
+          </div>
+          <div class="fx-edit-field fx-edit-full">
+            <label>Opponent</label>
+            <input type="text" data-field="opponent" value="${escapeHtml(f.opponent||'')}">
+          </div>
+          <div class="fx-edit-field">
+            <label>Venue</label>
+            <input type="text" data-field="venue" value="${escapeHtml(f.venue||'')}">
+          </div>
+          <div class="fx-edit-field">
+            <label>Competition</label>
+            <input type="text" data-field="competition" value="${escapeHtml(f.competition||'')}">
+          </div>
+        </div>
+        <div class="fx-edit-section">
+          <h4>Result (optional)</h4>
+          <div class="fx-edit-grid">
+            <div class="fx-edit-field">
+              <label>WHC Goals</label>
+              <input type="number" data-field="whc_goals" value="${f.whc_goals!=null?f.whc_goals:''}" min="0">
+            </div>
+            <div class="fx-edit-field">
+              <label>Opp Goals</label>
+              <input type="number" data-field="opp_goals" value="${f.opp_goals!=null?f.opp_goals:''}" min="0">
+            </div>
+            <div class="fx-edit-field">
+              <label>MOM</label>
+              <input type="text" data-field="mom" value="${escapeHtml(f.mom||'')}" placeholder="Leave blank if none">
+            </div>
+            <div class="fx-edit-field">
+              <label>DOD</label>
+              <input type="text" data-field="dod" value="${escapeHtml(f.dod||'')}">
+            </div>
+          </div>
+        </div>
+        <div class="fx-edit-actions">
+          <button class="fx-delete" onclick="deleteFixture(${f.id},'${escapeHtml(f.opponent||'this fixture').replace(/'/g,"&#39;")}')">🗑 Delete</button>
+          <button class="fx-save" onclick="saveFixtureEdit(${f.id})">💾 Save</button>
+        </div>
+      </div>`;
+    list.appendChild(row);
+  });
+}
+
+function toggleFixtureEdit(id){
+  fxEditingId=(fxEditingId===id?null:id);
+  loadFixturesList();
+}
+
+async function addFixture(){
+  const date=document.getElementById('fx-new-date').value;
+  const time=document.getElementById('fx-new-time').value;
+  const opp=document.getElementById('fx-new-opp').value.trim();
+  const venue=document.getElementById('fx-new-venue').value.trim();
+  const comp=document.getElementById('fx-new-comp').value.trim();
+  const al=document.getElementById('fx-alert');
+  if(!date){showAlert(al,'error','Date is required.');return;}
+  if(!opp){showAlert(al,'error','Opponent is required.');return;}
+  try{
+    const payload={match_date:date,opponent:opp,season:currentSeason};
+    if(time)payload.kick_off_time=time;
+    if(venue)payload.venue=venue;
+    if(comp)payload.competition=comp;
+    const{error}=await sb.from('fixtures').insert(payload);
+    if(error)throw error;
+    showAlert(al,'success','Fixture added.');
+    document.getElementById('fx-new-date').value='';
+    document.getElementById('fx-new-time').value='';
+    document.getElementById('fx-new-opp').value='';
+    document.getElementById('fx-new-venue').value='';
+    document.getElementById('fx-new-comp').value='';
+    loadFixturesList();
+  }catch(e){
+    showAlert(al,'error','Failed: '+e.message);
+  }
+}
+
+async function saveFixtureEdit(id){
+  const row=document.querySelector('.fx-row[data-id="'+id+'"]');
+  if(!row)return;
+  const al=document.getElementById('fx-alert');
+  const getF=name=>row.querySelector('[data-field="'+name+'"]').value;
+  const match_date=getF('match_date');
+  const opponent=getF('opponent').trim();
+  if(!match_date){showAlert(al,'error','Date is required.');return;}
+  if(!opponent){showAlert(al,'error','Opponent is required.');return;}
+  const whcRaw=getF('whc_goals'),oppRaw=getF('opp_goals');
+  const whc_goals=whcRaw===''?null:parseInt(whcRaw);
+  const opp_goals=oppRaw===''?null:parseInt(oppRaw);
+  let result=null,match_points=null;
+  if(whc_goals!=null&&opp_goals!=null){
+    result=whc_goals>opp_goals?'W':whc_goals<opp_goals?'L':'D';
+    match_points=result==='W'?3:result==='D'?1:0;
+  }
+  const payload={
+    match_date,
+    opponent,
+    kick_off_time:getF('kick_off_time')||null,
+    venue:getF('venue').trim()||null,
+    competition:getF('competition').trim()||null,
+    whc_goals,
+    opp_goals,
+    result,
+    match_points,
+    mom:getF('mom').trim()||null,
+    dod:getF('dod').trim()||null
+  };
+  try{
+    const{error}=await sb.from('fixtures').update(payload).eq('id',id);
+    if(error)throw error;
+    fxEditingId=null;
+    showAlert(al,'success','Saved.');
+    loadFixturesList();
+  }catch(e){
+    showAlert(al,'error','Failed: '+e.message);
+  }
+}
+
+async function deleteFixture(id,opp){
+  if(!confirm(`Delete fixture vs ${opp}?\n\nThis will CASCADE-DELETE all match_stats, vote sessions, and individual votes for this fixture. Cannot be undone.`))return;
+  try{
+    const{error}=await sb.from('fixtures').delete().eq('id',id);
+    if(error)throw error;
+    fxEditingId=null;
+    showAlert(document.getElementById('fx-alert'),'success','Fixture deleted.');
+    loadFixturesList();
+  }catch(e){
+    showAlert(document.getElementById('fx-alert'),'error','Failed: '+e.message);
+  }
+}
 
 // ── PWA ───────────────────────────────────────────────────────
 const mb=new Blob([JSON.stringify({name:'WHC Hockey',short_name:'WHC',start_url:'/',display:'standalone',background_color:'#120810',theme_color:'#6B1E3A'})],{type:'application/json'});
