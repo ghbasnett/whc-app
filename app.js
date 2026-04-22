@@ -122,6 +122,16 @@ function onSeasonChange(){
   if(id==='fixtures')loadFixtures();
   if(id==='vote')loadOpenVoteSession();
   if(id==='fine')loadFines();
+  // If meeting section is open & authed, refresh whichever sub-tab is showing
+  if(id==='meeting'){
+    const mc=document.getElementById('meeting-content');
+    if(mc&&mc.style.display!=='none'){
+      const indFines=document.getElementById('m-ind-fines');
+      const preds=document.getElementById('m-predictions');
+      if(indFines&&indFines.classList.contains('active'))renderIndFines();
+      if(preds&&preds.classList.contains('active'))loadPredictions();
+    }
+  }
   // If captain portal is open on a season-sensitive tab, refresh it
   const cpModal=document.getElementById('captain-modal');
   if(cpModal&&cpModal.classList.contains('open')&&captainAuthed){
