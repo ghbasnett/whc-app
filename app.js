@@ -677,11 +677,12 @@ function renderThresholdPill(){
   const existing=document.getElementById('stats-threshold-pill');if(existing)existing.remove();
   if(!thresholdActive)return;
   const pill=document.createElement('div');
-  pill.className='threshold-pill';
+  pill.className='threshold-pill threshold-pill-below';
   pill.id='stats-threshold-pill';
   pill.innerHTML=`ℹ Min apps threshold: <strong style="margin-left:3px">${minAppsThreshold}</strong><span style="margin-left:4px;color:#666">(20% of ${completedFixturesCount} played)</span>`;
+  // Insert AFTER the stats-wrap (footnote position rather than header position)
   const wrap=document.getElementById('stats-wrap');
-  wrap.parentNode.insertBefore(pill,wrap);
+  wrap.parentNode.insertBefore(pill,wrap.nextSibling);
 }
 
 function renderStats(col){
