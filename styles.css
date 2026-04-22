@@ -45,13 +45,16 @@ body{background:var(--dark);color:var(--white);font-family:'Outfit',sans-serif;m
 .lh-stat-label{font-size:9px;color:#888;letter-spacing:1.5px;text-transform:uppercase;font-weight:600;margin-top:2px;}
 
 /* Sort tabs */
-.sort-tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;}
-.sort-tab{background:transparent;border:1px solid var(--border);color:#888;padding:5px 12px;border-radius:14px;cursor:pointer;font-size:11px;font-family:'Outfit',sans-serif;font-weight:600;letter-spacing:1px;transition:all 0.2s;}
+/* Sort tabs — single row, no wrap, pills sized to fit four across on iPhone width */
+.sort-tabs{display:flex;gap:5px;margin-bottom:12px;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px;scrollbar-width:none;}
+.sort-tabs::-webkit-scrollbar{display:none;}
+.sort-tab{background:transparent;border:1px solid var(--border);color:#888;padding:6px 10px;border-radius:14px;cursor:pointer;font-size:11px;font-family:'Outfit',sans-serif;font-weight:600;letter-spacing:0.5px;transition:all 0.2s;white-space:nowrap;flex:1 1 0;min-width:0;text-align:center;}
 .sort-tab.active,.sort-tab:hover{background:var(--pink);color:#fff;border-color:var(--pink);}
 
 /* Threshold pill */
 .threshold-pill{display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:12px;padding:4px 10px;font-size:10px;color:#888;letter-spacing:0.5px;margin-bottom:10px;}
 .threshold-pill strong{color:var(--light-pink);font-weight:600;}
+.threshold-pill.threshold-pill-below{margin-top:10px;margin-bottom:0;}
 
 /* Stats table wrapper */
 .stats-wrap{overflow-x:auto;border-radius:12px;border:1px solid var(--border);position:relative;-webkit-overflow-scrolling:touch;background:#14070c;}
