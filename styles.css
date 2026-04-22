@@ -221,8 +221,9 @@ body{background:var(--dark);color:var(--white);font-family:'Outfit',sans-serif;m
 .pw-error{color:#f44336;font-size:12px;min-height:16px;}
 
 /* MEETING */
-.meeting-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;}
-.mtab{background:transparent;border:1px solid var(--border);color:#888;padding:6px 12px;border-radius:16px;cursor:pointer;font-size:11px;letter-spacing:1px;text-transform:uppercase;font-family:'Outfit',sans-serif;font-weight:600;transition:all 0.2s;}
+.meeting-tabs{display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:16px;padding-bottom:2px;scrollbar-width:none;}
+.meeting-tabs::-webkit-scrollbar{display:none;}
+.mtab{background:transparent;border:1px solid var(--border);color:#888;padding:6px 12px;border-radius:16px;cursor:pointer;font-size:11px;letter-spacing:1px;text-transform:uppercase;font-family:'Outfit',sans-serif;font-weight:600;transition:all 0.2s;white-space:nowrap;flex-shrink:0;}
 .mtab.active,.mtab:hover{background:var(--pink);color:#fff;border-color:var(--pink);}
 .msection{display:none;}.msection.active{display:block;}
 
@@ -286,8 +287,9 @@ body{background:var(--dark);color:var(--white);font-family:'Outfit',sans-serif;m
 .modal-body{padding:18px;}
 
 /* ── CAPTAIN PORTAL TABS ────────────────────────────────── */
-.cp-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;}
-.cp-tab{background:transparent;border:1px solid var(--border);color:#888;padding:6px 12px;border-radius:16px;cursor:pointer;font-size:11px;letter-spacing:1px;text-transform:uppercase;font-family:'Outfit',sans-serif;font-weight:600;transition:all 0.2s;}
+.cp-tabs{display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:16px;padding-bottom:2px;scrollbar-width:none;}
+.cp-tabs::-webkit-scrollbar{display:none;}
+.cp-tab{background:transparent;border:1px solid var(--border);color:#888;padding:6px 12px;border-radius:16px;cursor:pointer;font-size:11px;letter-spacing:1px;text-transform:uppercase;font-family:'Outfit',sans-serif;font-weight:600;transition:all 0.2s;white-space:nowrap;flex-shrink:0;}
 .cp-tab.active,.cp-tab:hover{background:var(--pink);color:#fff;border-color:var(--pink);}
 .cp-tab-content{display:none;}
 .cp-tab-content.active{display:block;}
