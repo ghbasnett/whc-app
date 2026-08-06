@@ -12,7 +12,7 @@ function getDefaultSeason(date){
   const d=date||new Date();
   const year=d.getFullYear();
   const month=d.getMonth(); // 0-indexed; Sept = 8
-  const startYear=month>=8?year:year-1;
+  const startYear=month>=7?year:year-1;
   const endYY=String(startYear+1).slice(-2);
   return startYear+'-'+endYY;
 }
