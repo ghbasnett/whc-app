@@ -825,7 +825,11 @@ async function loadFixtures(){
   document.getElementById('fix-loading').style.display='block';
   document.getElementById('fix-list').innerHTML='';
   try{
-    const{data,error}=await sb.from('fixtures').select('*').eq('season',currentSeason).order('match_date',{ascending:false});
+    const{data,error}=await sb.from('fixtures')
+      .select('*')
+      .eq('season',currentSeason)
+      .order('match_date',{ascending:true})
+      .order('kick_off_time',{ascending:true,nullsFirst:false});
     if(error)throw error;
     renderFixtures(data||[]);
   }catch(e){document.getElementById('fix-loading').innerHTML=`<p style="color:#f44336">Failed.</p>`;}
