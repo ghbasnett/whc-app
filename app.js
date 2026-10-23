@@ -611,8 +611,8 @@ async function loadStats(){
 
     statsData=statsRes.data||[];
     completedFixturesCount=fixtureRes.count||0;
-    thresholdActive=completedFixturesCount>=10;
-    minAppsThreshold=thresholdActive?Math.ceil(completedFixturesCount*0.2):0;
+    thresholdActive=completedFixturesCount>=8;
+    minAppsThreshold=thresholdActive?Math.ceil(completedFixturesCount*0.3):0;
 
     renderStats(currentSort);
   }catch(e){
